@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { SdrService, deriveKanbanStage, SdrStage, MIN_MENSAGENS_POR_DIA } from './sdr.service';
+import { SdrFollowupService } from './sdr-followup.service';
 import { LeadsService } from '../leads/leads.service';
 import { FacebookService } from '../facebook/facebook.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -88,6 +89,7 @@ export class SdrController {
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
     private readonly enrichmentService: EnrichmentService,
+    private readonly sdrFollowup: SdrFollowupService,
   ) {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || 'https://free.uazapi.com';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
@@ -328,6 +330,16 @@ export class SdrController {
       return;
     }
 
+    // Lead respondeu → reinicia a cadência de follow-up (toque 1 daqui 30min).
+    await this.sdrFollowup.resetCadenceOnReply(lead.id);
+
+    // Camada 1 de STOP (determinístico) — roda DEPOIS do reset acima, senão o
+    // reset reativaria a pausa desta mesma mensagem.
+    if (this.sdrFollowup.checkStopKeyword(text)) {
+      await this.sdrFollowup.pauseCadence(lead.id);
+      this.logger.warn(`[SDR][FOLLOWUP-STOP] Pedido de parar detectado (regex) — cadência pausada para ${phone}`);
+    }
+
     await this.sendTyping(phone, 2000);
 
     // Processa com IA (1 retry se falhar)
@@ -402,6 +414,13 @@ export class SdrController {
     // Handoff → operador assume, IA desliga
     if (handoff) {
       updateData.aiPaused = true;
+    }
+
+    // Camada 2 de STOP (semântica): a própria Sofia concluiu que o lead pediu
+    // pra parar ou sumiu de vez (ai.stage === 'perdido') — pausa a cadência de
+    // follow-up automático, mesmo sem ter batido a regex determinística acima.
+    if (ai.stage === 'perdido') {
+      updateData.nurturePaused = true;
     }
 
     // Não qualificado (não vende cabelo, iniciante, ou volume baixo de
@@ -587,12 +606,14 @@ export class SdrController {
 
   /**
    * Tempo de "digitação" proporcional ao tamanho do texto, simulando o quanto um
-   * humano levaria pra escrever aquilo (~45 caracteres/segundo), com piso e teto
-   * pra não parecer instantâneo nem travar demais numa resposta longa.
+   * humano levaria pra escrever aquilo (~45ms por caractere — mesma fórmula do
+   * fisio-secretary, considerada mais natural que a anterior daqui, que era 2x mais
+   * rápida), com piso e teto pra não parecer instantâneo nem travar demais numa
+   * resposta longa.
    */
   private typingDelayForText(text: string): number {
-    const perCharMs = 1000 / 45;
-    return Math.min(8000, Math.max(1200, Math.round(text.length * perCharMs)));
+    const msPerChar = 45;
+    return Math.min(6000, Math.max(1200, Math.round(text.length * msPerChar)));
   }
 
   /** Envia a resposta da IA em uma ou mais bolhas, cada uma com "digitando..." proporcional ao tamanho do texto. */

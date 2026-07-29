@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -25,6 +25,31 @@ const VIDEO_LIMIT_KEY = 'sdr_video_daily_limit';
 const DEFAULT_VIDEO_LIMIT = 15;
 
 export { FOLLOWUP_ENABLED_KEY, FOLLOWUP_DELAY_KEY, FOLLOWUP_MODE_KEY, FOLLOWUP_TEXT_KEY, VIDEO_LIMIT_KEY, DEFAULT_VIDEO_LIMIT };
+
+// ─────────────────────────────────────────────────────────────────────────
+// CADÊNCIA DE FOLLOW-UP (múltiplos toques) — especificação real do Marcel
+// (Pro Cleaning): toque 1 aos 30min de inatividade; toque 2 +2h depois; se
+// ainda não respondeu, 1 toque/dia por mais 6 dias (8 toques no total).
+// Reinicia (nurtureStep=0) toda vez que o lead responde. Independente do
+// sistema de FollowupRule acima (que é 1 disparo só, por raia/campanha) —
+// esse aqui é sempre ativo pra qualquer lead do SDR, sem precisar configurar regra.
+const CADENCE_STEPS_MINUTES = [30, 120, 1440, 1440, 1440, 1440, 1440, 1440];
+
+interface CadenceWindow { start: number; end: number }
+// Janela de envio automático (nunca restringe o chat ao vivo, só o follow-up
+// automático): seg-sex 18h-22h, sáb 11h-17h, dom 15h-18h, tudo em BRT.
+const CADENCE_WINDOW: { weekday: CadenceWindow; saturday: CadenceWindow; sunday: CadenceWindow } = {
+  weekday: { start: 18, end: 22 },
+  saturday: { start: 11, end: 17 },
+  sunday: { start: 15, end: 18 },
+};
+
+// STOP determinístico (camada 1) — pausa a cadência na hora, sem depender da
+// IA. A camada 2 (semântica) é o próprio ai.stage === 'perdido' do Sofia,
+// tratada no sdr.controller.ts.
+const STOP_CADENCE_REGEX = /\bstop\b|\bpare\b|\bparar\b|cancela|n[aã]o\s+tenho\s+interesse|sem\s+interesse/i;
+
+export { CADENCE_STEPS_MINUTES, STOP_CADENCE_REGEX };
 
 @Injectable()
 export class SdrFollowupService {
@@ -274,6 +299,102 @@ export class SdrFollowupService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ───────── Cadência de múltiplos toques (Marcel) ─────────
+
+  /** Lead respondeu → reinicia a cadência (toque 1 daqui 30min) e tira pausa de STOP anterior. */
+  async resetCadenceOnReply(leadId: string): Promise<void> {
+    const nextNurtureAt = new Date(Date.now() + CADENCE_STEPS_MINUTES[0] * 60_000);
+    await this.leadsRepo.update(leadId, { nurtureStep: 0, nextNurtureAt, nurturePaused: false });
+  }
+
+  /** Camada 1 de STOP: regex determinístico no texto recebido do lead. */
+  checkStopKeyword(text: string): boolean {
+    return STOP_CADENCE_REGEX.test(text || '');
+  }
+
+  async pauseCadence(leadId: string): Promise<void> {
+    await this.leadsRepo.update(leadId, { nurturePaused: true });
+  }
+
+  private currentHourBRT(): number {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date());
+    return parseInt(parts.find((p) => p.type === 'hour')!.value, 10);
+  }
+
+  // 0=domingo ... 6=sábado, igual Date#getDay().
+  private currentWeekdayBRT(): number {
+    const short = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo', weekday: 'short',
+    }).format(new Date());
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[short] ?? new Date().getDay();
+  }
+
+  private isWithinCadenceWindow(): boolean {
+    const dow = this.currentWeekdayBRT();
+    const window = dow === 0 ? CADENCE_WINDOW.sunday : dow === 6 ? CADENCE_WINDOW.saturday : CADENCE_WINDOW.weekday;
+    const h = this.currentHourBRT();
+    return h >= window.start && h < window.end;
+  }
+
+  // A cada minuto: dispara os toques de cadência vencidos (nextNurtureAt <= agora),
+  // só dentro da janela de horário configurada. Reaproveita generateAiFollowup
+  // (mesma geração SPIN-aware já usada pelo follow-up de 1 disparo só) e sendFollowup
+  // (mesmo envio + registro no histórico) — só a orquestração de múltiplos toques é nova.
+  @Cron(CronExpression.EVERY_MINUTE)
+  async processNurtureCadence(): Promise<void> {
+    if (!this.isWithinCadenceWindow()) return;
+
+    const dueLeads = await this.leadsRepo
+      .createQueryBuilder('lead')
+      .where('lead.agent_mode = :mode', { mode: 'sdr' })
+      .andWhere('lead.ai_paused = false')
+      .andWhere('lead.nurture_paused = false')
+      .andWhere('lead.next_nurture_at IS NOT NULL')
+      .andWhere('lead.next_nurture_at <= :now', { now: new Date() })
+      .getMany();
+
+    let sent = 0;
+    for (const lead of dueLeads) {
+      const stepIndex = lead.nurtureStep;
+      const offsetMinutes = CADENCE_STEPS_MINUTES[stepIndex];
+
+      // Sem passo neste índice → cadência esgotada (8 toques já feitos), encerra.
+      if (offsetMinutes == null) {
+        await this.leadsRepo.update(lead.id, { nextNurtureAt: null });
+        continue;
+      }
+
+      // Claim atômico: só segue quem conseguiu mover nextNurtureAt nesta execução
+      // (evita disparo duplicado se o cron se sobrepuser).
+      const claim = await this.leadsRepo
+        .createQueryBuilder()
+        .update(Lead)
+        .set({ nurtureStep: stepIndex + 1 })
+        .where('id = :id', { id: lead.id })
+        .andWhere('next_nurture_at = :expected', { expected: lead.nextNurtureAt })
+        .execute();
+      if (!claim.affected) continue;
+
+      const nextOffset = CADENCE_STEPS_MINUTES[stepIndex + 1];
+      const nextNurtureAt = nextOffset != null ? new Date(Date.now() + nextOffset * 60_000) : null;
+      await this.leadsRepo.update(lead.id, { nextNurtureAt });
+
+      const message = await this.generateAiFollowup(lead, offsetMinutes);
+      if (!message) continue;
+
+      if (sent > 0) {
+        await this.sleep(5000 + Math.random() * 5000);
+      }
+
+      await this.sendFollowup(lead, message);
+      sent++;
+      this.logger.log(`[CADENCE] Toque ${stepIndex + 1}/${CADENCE_STEPS_MINUTES.length} → ${lead.phone} (lead ${lead.id})`);
+    }
   }
 
   /** Status do follow-up para o painel de Configurações — agrupado por regra. */

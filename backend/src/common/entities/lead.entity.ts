@@ -194,6 +194,20 @@ export class Lead {
   @Column({ name: 'followup_sent_at', type: 'timestamp', nullable: true })
   followupSentAt?: Date | null;
 
+  // Cadência de follow-up automático (múltiplos toques) — independente do
+  // followupSentAt acima (que é do sistema de 1 disparo só por regra/campanha).
+  // nurtureStep = índice do próximo toque a disparar; nextNurtureAt = quando
+  // dispara; nurturePaused = true trava a cadência (STOP do lead), sem afetar
+  // aiPaused (a IA pode continuar respondendo normalmente numa conversa ativa).
+  @Column({ name: 'nurture_step', type: 'int', default: 0 })
+  nurtureStep: number;
+
+  @Column({ name: 'next_nurture_at', type: 'timestamp', nullable: true })
+  nextNurtureAt?: Date | null;
+
+  @Column({ name: 'nurture_paused', type: 'boolean', default: false })
+  nurturePaused: boolean;
+
   @Column({ name: 'notes', type: 'text', nullable: true })
   notes?: string | null;
 
