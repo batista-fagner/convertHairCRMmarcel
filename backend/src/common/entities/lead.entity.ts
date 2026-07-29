@@ -95,6 +95,12 @@ export class Lead {
   @Column({ name: 'iniciante', type: 'boolean', nullable: true })
   iniciante?: boolean | null;
 
+  // Sinal de qualificação da Clara (Pro Cleaning): true = já é dona do próprio
+  // schedule/negócio, false = ainda trabalha como helper. Não desqualifica —
+  // só define a raia (qualificado x atendimento), ver deriveKanbanStage.
+  @Column({ name: 'dona_de_schedule', type: 'boolean', nullable: true })
+  donaDeSchedule?: boolean | null;
+
   @Column({ name: 'tags', type: 'jsonb', nullable: true })
   tags?: string[] | null;
 

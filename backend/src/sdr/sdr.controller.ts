@@ -2,13 +2,14 @@ import { Controller, Post, Body, Logger, Param } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
-import { SdrService, deriveKanbanStage, SdrStage, MIN_MENSAGENS_POR_DIA } from './sdr.service';
+import { SdrService, deriveKanbanStage, SdrStage } from './sdr.service';
 import { SdrFollowupService } from './sdr-followup.service';
+import { AvailabilityService } from '../availability/availability.service';
+import { AppointmentsService } from '../appointments/appointments.service';
 import { LeadsService } from '../leads/leads.service';
 import { FacebookService } from '../facebook/facebook.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SettingsService } from '../settings/settings.service';
-import { EnrichmentService } from '../enrichment/enrichment.service';
 import { Lead, WaStage } from '../common/entities/lead.entity';
 
 export const SDR_NOTIFY_PHONES_KEY = 'sdr_notify_phones';
@@ -88,8 +89,9 @@ export class SdrController {
     private readonly http: HttpService,
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
-    private readonly enrichmentService: EnrichmentService,
     private readonly sdrFollowup: SdrFollowupService,
+    private readonly availabilityService: AvailabilityService,
+    private readonly appointmentsService: AppointmentsService,
   ) {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || 'https://free.uazapi.com';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
@@ -342,11 +344,15 @@ export class SdrController {
 
     await this.sendTyping(phone, 2000);
 
+    // Tabela de horários livres do Lucas, recalculada a cada mensagem — a Sofia
+    // só pode oferecer/confirmar horários que estão literalmente aqui.
+    const availability = await this.availabilityService.buildAvailabilityBlock();
+
     // Processa com IA (1 retry se falhar)
-    let ai = await this.sdrService.processMessage(lead, text);
+    let ai = await this.sdrService.processMessage(lead, text, availability.text);
     if (!ai.success) {
       await new Promise((r) => setTimeout(r, 2000));
-      ai = await this.sdrService.processMessage(lead, text);
+      ai = await this.sdrService.processMessage(lead, text, availability.text);
     }
 
     // Loop: a IA respondeu a mesma coisa 3 vezes seguidas (não avança a conversa).
@@ -361,39 +367,77 @@ export class SdrController {
       return;
     }
 
-    // Guarda o histórico com "|||" trocado por quebra de linha: o marcador é só
-    // uma instrução de envio (2 bolhas de WhatsApp), não deve aparecer literal
-    // nem no modal de conversa do CRM nem no contexto que a própria IA relê.
-    const contextReply = (ai.reply ?? '').replace(/\|\|\|/g, '\n');
-    const updatedContext = this.sdrService.buildUpdatedContext(lead, text, contextReply);
-
-    // Os 3 sinais da qualificação são persistidos: o sistema guarda o que já foi
-    // respondido, então só sobrescreve quando a IA manda algo novo nesta mensagem
-    // (senão mantém o valor já salvo — a IA não precisa repetir a cada turno).
-    const vendeCabelo = ai.vendeCabelo === true || ai.vendeCabelo === false ? ai.vendeCabelo : lead.vendeCabelo ?? null;
-    const mensagensPorDia = typeof ai.mensagensPorDia === 'number' ? ai.mensagensPorDia : lead.mensagensPorDia ?? null;
-    const semInstagram = ai.semInstagram === true ? true : lead.semInstagram ?? null;
-    const iniciante = ai.iniciante === true ? true : lead.iniciante ?? null;
-    const instagramValue = ai.instagram && typeof ai.instagram === 'string' && ai.instagram !== 'null'
-      ? ai.instagram.replace('@', '').trim()
-      : lead.instagram;
+    // Sinal da pergunta única (dona de schedule?) é persistido: só sobrescreve
+    // quando a IA manda algo novo nesta mensagem, senão mantém o valor já salvo.
+    const donaDeSchedule = ai.donaDeSchedule === true || ai.donaDeSchedule === false ? ai.donaDeSchedule : lead.donaDeSchedule ?? null;
     const nomeValue = ai.nome && typeof ai.nome === 'string' && ai.nome !== 'null' ? ai.nome.trim() : null;
 
-    // Raia calculada (a "verdade" da qualificação): vende cabelo = qualificado,
-    // mas iniciante ou volume baixo (<10 msgs/dia) desqualifica mesmo assim.
-    const derivedStage = deriveKanbanStage(vendeCabelo, ai.stage, lead.status, mensagensPorDia, iniciante);
+    // Raia calculada: todo lead já vem pré-qualificado pelo anúncio, não existe
+    // desqualificação aqui — só diferencia "qualificado" (já é dona do próprio
+    // schedule) de "atendimento" (ainda helper, ou ainda não respondeu).
+    const derivedStage = deriveKanbanStage(donaDeSchedule, ai.stage, lead.status);
 
-    // Handoff pro especialista só acontece depois das respostas completas
-    // (vende cabelo=true + volume de mensagens/dia conhecido + instagram
-    // conhecido ou confirmado que não tem) — e só dispara uma vez.
-    const instagramKnown = Boolean(instagramValue) || semInstagram === true;
-    const mensagensPorDiaKnown = typeof mensagensPorDia === 'number';
-    const readyForHandoff = vendeCabelo === true && mensagensPorDiaKnown && instagramKnown;
+    // Pronta pro próximo passo (agenda) assim que a pergunta única foi
+    // respondida — não existe mais critério de qualificação além disso.
+    const readyForHandoff = donaDeSchedule !== null;
     const alreadyHandedOff = lead.waStage === 'encerrado';
-    const handoff = readyForHandoff && !alreadyHandedOff;
+
+    // A Clara só faz handoff de vez quando CONFIRMOU um horário real com o
+    // Marcel (action="schedule") — ou, se não há disponibilidade nenhuma na
+    // agenda, cai no comportamento antigo (handoff sem agendar, "a equipe
+    // entra em contato"). Enquanto isso, mesmo já sabendo a resposta da
+    // pergunta única, ela continua respondendo (oferecendo/confirmando
+    // horário) nos próximos turnos.
+    // Roda ANTES de montar contextReply/updatedContext — se a corrida de horário
+    // falhar, ai.reply é sobrescrito aqui e o histórico salvo abaixo já reflete
+    // a mensagem real enviada, não a que a IA assumiu que ia mandar.
+    let bookedNow = false;
+    let bookedAtDateTime: Date | null = null;
+    if (readyForHandoff && !alreadyHandedOff && ai.action === 'schedule' && ai.appointmentDateTime) {
+      const parsedDateTime = this.availabilityService.parseBrtNaiveDateTime(ai.appointmentDateTime);
+      if (parsedDateTime && (await this.availabilityService.isSlotAvailable(parsedDateTime))) {
+        try {
+          await this.appointmentsService.create({
+            leadId: lead.id,
+            clientName: lead.name || phone,
+            clientPhone: phone,
+            service: 'Sessão de Mentoria Gratuita com Marcel',
+            startDateTime: parsedDateTime,
+            status: 'agendado',
+          });
+          bookedNow = true;
+          bookedAtDateTime = parsedDateTime;
+          this.logger.log(`[SDR][AGENDA] Sessão de Mentoria marcada para ${phone} em ${parsedDateTime.toISOString()}`);
+        } catch (err: any) {
+          this.logger.error(`[SDR][AGENDA] Falha ao criar agendamento pra ${phone}: ${err.message}`);
+        }
+      } else {
+        // Corrida: horário que a IA ofereceu já não está mais livre (raro, mas
+        // possível se dois leads confirmarem quase ao mesmo tempo). Não confirma,
+        // não faz handoff — o lead continua a conversa e escolhe outro horário
+        // no próximo turno, já vendo a tabela atualizada.
+        this.logger.warn(`[SDR][AGENDA] Horário ${ai.appointmentDateTime} não está mais disponível para ${phone} — não agendado`);
+        ai.reply = 'Poxa, esse horário acabou de ser preenchido por outra pessoa! 😅 Me diz outro horário que funcione pra você que eu já vejo se ainda tá livre.';
+      }
+    }
+
+    // Escalada explícita pra humano (preço fora do documentado, reclamação,
+    // ameaça jurídica, pedido de falar com o Marcel/atendente, etc.) —
+    // independe da pergunta única já ter sido respondida ou não.
+    const explicitEscalation = ai.shouldIgnore === true && !alreadyHandedOff;
+
+    const handoff = !alreadyHandedOff && (explicitEscalation || (readyForHandoff && (bookedNow || !availability.hasSlots)));
 
     // Estágio terminal quando faz handoff
     const newStage: SdrStage = handoff ? 'encerrado' : ai.stage;
+
+    // Guarda o histórico com "|||" trocado por quebra de linha: o marcador é só
+    // uma instrução de envio (2 bolhas de WhatsApp), não deve aparecer literal
+    // nem no modal de conversa do CRM nem no contexto que a própria IA relê.
+    // Vem DEPOIS do bloco de agendamento acima pra já refletir um eventual
+    // ai.reply sobrescrito (corrida de horário).
+    const contextReply = (ai.reply ?? '').replace(/\|\|\|/g, '\n');
+    const updatedContext = this.sdrService.buildUpdatedContext(lead, text, contextReply);
 
     const updateData: any = {
       aiContext: updatedContext,
@@ -401,34 +445,21 @@ export class SdrController {
       temperature: ai.temperature,
       waLastMessageAt: new Date(),
       followupSentAt: null,
-      vendeCabelo,
-      mensagensPorDia,
-      semInstagram,
-      iniciante,
+      donaDeSchedule,
     };
 
-    if (instagramValue) updateData.instagram = instagramValue;
     if (nomeValue) updateData.name = nomeValue;
-    const isNewInstagram = Boolean(instagramValue && !lead.instagram);
 
     // Handoff → operador assume, IA desliga
     if (handoff) {
       updateData.aiPaused = true;
     }
 
-    // Camada 2 de STOP (semântica): a própria Sofia concluiu que o lead pediu
+    // Camada 2 de STOP (semântica): a própria Clara concluiu que o lead pediu
     // pra parar ou sumiu de vez (ai.stage === 'perdido') — pausa a cadência de
     // follow-up automático, mesmo sem ter batido a regex determinística acima.
     if (ai.stage === 'perdido') {
       updateData.nurturePaused = true;
-    }
-
-    // Não qualificado (não vende cabelo, iniciante, ou volume baixo de
-    // mensagens/dia) → IA desliga automaticamente, a mensagem de encerramento
-    // já foi escrita pela própria IA (ver QUALIFICAÇÃO em sdr.prompt.ts).
-    const lowVolume = typeof mensagensPorDia === 'number' && mensagensPorDia < MIN_MENSAGENS_POR_DIA;
-    if (vendeCabelo === false || iniciante === true || lowVolume) {
-      updateData.aiPaused = true;
     }
 
     // Só atualiza a raia se o operador NÃO travou o card manualmente
@@ -436,64 +467,19 @@ export class SdrController {
       updateData.kanbanStage = derivedStage;
     }
 
-    // Entrou em "atendimento" (lead respondeu, conversa em andamento) → evento
-    // "Lead" pro Meta, uma única vez. Também dispara se o lead pular direto pra
-    // "qualificado" numa tacada só, garantindo que o Lead sempre preceda o MQL
-    // (senão o funil no Meta ficaria com MQL sem Lead correspondente).
-    const inService = derivedStage === 'atendimento';
-    const qualified = derivedStage === 'qualificado';
-    if ((inService || qualified) && !lead.leadEventSent) {
-      updateData.leadEventSent = true;
-      this.facebookService
-        .sendLeadEvent({ ...lead, leadEventSent: true }, { fbp: lead.fbp, fbc: lead.fbc })
-        .catch((err) => this.logger.error(`[SDR] Erro ao enviar Lead ao Meta: ${err.message}`));
-      this.logger.log(`[SDR] Lead ${phone} entrou em atendimento — evento Lead enviado ao Meta`);
-    }
-
-    // Vende cabelo = sim → MQL: marca e dispara evento pro Meta (uma única vez).
-    // Independe de investir em anúncio — isso só soma a tag premium abaixo.
-    if (vendeCabelo === true && !lead.isMql) {
-      updateData.isMql = true;
-      updateData.qualifiedAt = new Date();
-      this.facebookService
-        .sendMqlEvent({ ...lead, isMql: true }, { fbp: lead.fbp, fbc: lead.fbc })
-        .catch((err) => this.logger.error(`[SDR] Erro ao enviar MQL ao Meta: ${err.message}`));
-      this.logger.log(`[SDR] Lead ${phone} vende cabelo (MQL) — evento enviado ao Meta`);
-    }
-
-    // Volume de mensagens/dia define premium (>=30) vs básico (<30) — mesma
-    // raia "qualificado", sem evento novo pro Meta, só diferencia visualmente
-    // quem tem mais volume. Remove a tag oposta se o lead corrigir a resposta.
-    const existingTags = lead.tags || [];
-    if (typeof mensagensPorDia === 'number') {
-      const tag = mensagensPorDia >= 30 ? 'mql_premium' : 'mql_basico';
-      const otherTag = mensagensPorDia >= 30 ? 'mql_basico' : 'mql_premium';
-      const withoutOther = existingTags.filter((t) => t !== otherTag);
-      if (!withoutOther.includes(tag)) {
-        updateData.tags = [...withoutOther, tag];
-        this.logger.log(`[SDR] Lead ${phone} tem ${mensagensPorDia} msgs/dia — tag ${tag} adicionada`);
-      } else if (withoutOther.length !== existingTags.length) {
-        updateData.tags = withoutOther;
-      }
-    }
+    // Sem envio de evento Lead/MQL pro Meta neste tenant por enquanto — as
+    // credenciais do Meta configuradas aqui ainda são as do Fagner, não as do
+    // Marcel. Reativar (mesmo padrão do convertHairCRM original,
+    // facebookService.sendLeadEvent/sendMqlEvent) assim que o Marcel passar
+    // as próprias credenciais.
 
     lead = await this.leadsService.update(lead.id, updateData);
-
-    // Instagram informado pela 1ª vez → busca dados reais (Apify) + análise
-    // IA em segundo plano, pra alimentar a página "Instagram Leads". skipMessage
-    // porque a Sofia já está conversando com o lead — não manda outra mensagem.
-    // Roda só depois do update acima pra evitar buscar o lead sem o Instagram salvo ainda.
-    if (isNewInstagram) {
-      this.enrichmentService.enrichLeadFromInstagram(lead.id, { skipMessage: true }).catch((err) =>
-        this.logger.warn(`[SDR] Erro ao enriquecer Instagram do lead ${phone}: ${err.message}`),
-      );
-    }
 
     if (ai.reply) await this.sendReplyAsBubbles(phone, ai.reply);
 
     // Handoff: avisa o closer e destaca o card
     if (handoff) {
-      await this.notifyOperator(lead);
+      await this.notifyOperator(lead, bookedAtDateTime ?? undefined);
       this.realtime.emitLeadHandoff(lead);
     } else {
       this.realtime.emitLeadUpdated(lead);
@@ -551,7 +537,7 @@ export class SdrController {
     );
   }
 
-  private async notifyOperator(lead: Lead) {
+  private async notifyOperator(lead: Lead, bookedAt?: Date) {
     // Resolve phones: banco tem prioridade, env var é fallback para o primeiro
     const stored = await this.settings.get(SDR_NOTIFY_PHONES_KEY);
     const phones: string[] = stored
@@ -560,8 +546,13 @@ export class SdrController {
 
     if (phones.length === 0) return;
 
-    const isPremium = (lead.tags || []).includes('mql_premium');
-    const msg = `${isPremium ? '🔥🔥 Lead MQL PREMIUM' : '🔥 Lead qualificado'} pelo SDR!\n\nNome: ${lead.name}\nWhatsApp: ${lead.phone}${lead.instagram ? `\nInstagram: @${lead.instagram.replace('@', '')}` : '\nInstagram: não tem'}${isPremium ? '\nJá investe em anúncio: sim' : ''}${lead.revenueRange ? `\nFaturamento: ${lead.revenueRange}` : ''}\n\nAssuma a conversa.`;
+    const donaDeScheduleLine = lead.donaDeSchedule == null
+      ? ''
+      : `\nDona do próprio schedule: ${lead.donaDeSchedule ? 'sim' : 'não (helper)'}`;
+    const bookedLine = bookedAt
+      ? `\n\n📅 Já ficou AGENDADA a Sessão de Mentoria: ${bookedAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })}`
+      : '';
+    const msg = `🔥 Lead da Clara (Pro Cleaning)!\n\nNome: ${lead.name}\nWhatsApp: ${lead.phone}${donaDeScheduleLine}${bookedLine}\n\nAssuma a conversa.`;
 
     await Promise.allSettled(
       phones.map((phone) =>

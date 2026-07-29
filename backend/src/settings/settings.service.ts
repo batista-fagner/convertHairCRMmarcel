@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { Setting } from './setting.entity';
 import { SDR_PROMPT_KEY, DEFAULT_SDR_PROMPT, SDR_JSON_FORMAT, SDR_MODEL_KEY, SDR_DEFAULT_MODEL } from '../sdr/sdr.prompt';
+import { AvailabilityService } from '../availability/availability.service';
 
 @Injectable()
 export class SettingsService {
@@ -16,6 +17,7 @@ export class SettingsService {
     @InjectRepository(Setting)
     private settingsRepo: Repository<Setting>,
     private config: ConfigService,
+    private availabilityService: AvailabilityService,
   ) {
     this.openai = new OpenAI({ apiKey: config.get('OPENAI_API_KEY') });
     this.model = config.get('SDR_OPENAI_MODEL') || 'gpt-5.4-mini';
@@ -50,7 +52,8 @@ export class SettingsService {
   async simulate(message: string, history: { role: 'user' | 'assistant'; content: string }[]) {
     const basePrompt = await this.getSdrPrompt();
     const model = (await this.get(SDR_MODEL_KEY)) || this.model;
-    const systemPrompt = `${basePrompt}\n\n${SDR_JSON_FORMAT}`;
+    const availability = await this.availabilityService.buildAvailabilityBlock();
+    const systemPrompt = `${basePrompt}\n\n# HORÁRIOS DISPONÍVEIS (agenda real do Marcel, atualizada agora)\n${availability.text}\n\n${SDR_JSON_FORMAT}`;
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -77,10 +80,10 @@ export class SettingsService {
       stage: parsed.stage ?? 'qualificacao',
       temperature: parsed.temperature ?? 'morno',
       nome: parsed.nome ?? null,
-      vendeCabelo: parsed.vendeCabelo ?? null,
-      mensagensPorDia: parsed.mensagensPorDia ?? null,
-      instagram: parsed.instagram ?? null,
-      semInstagram: parsed.semInstagram ?? null,
+      donaDeSchedule: parsed.donaDeSchedule ?? null,
+      action: parsed.action ?? 'none',
+      appointmentDateTime: parsed.appointmentDateTime ?? null,
+      shouldIgnore: parsed.shouldIgnore ?? false,
     };
   }
 }

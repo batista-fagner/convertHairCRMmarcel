@@ -12,11 +12,10 @@ export interface SdrResponse {
   stage: SdrStage;
   temperature: LeadTemperature;
   nome?: string | null;
-  vendeCabelo?: boolean | null;
-  mensagensPorDia?: number | null;
-  instagram?: string | null;
-  semInstagram?: boolean | null;
-  iniciante?: boolean | null;
+  donaDeSchedule?: boolean | null;
+  action?: 'schedule' | 'none';
+  appointmentDateTime?: string | null;
+  shouldIgnore?: boolean;
   success: boolean;
 }
 
@@ -38,36 +37,30 @@ function buildLeadContext(lead?: Lead | null): string {
   return lines.length > 0 ? `\nCONTEXTO DO LEAD (use para não perguntar o que já foi dito):\n${lines.join('\n')}` : '';
 }
 
-// Compõe o prompt final: persona (editável) + contexto do lead + formato JSON obrigatório
-function buildSystemPrompt(basePrompt: string, lead?: Lead | null): string {
-  return `${basePrompt}\n${buildLeadContext(lead)}\n\n${SDR_JSON_FORMAT}`;
+// Compõe o prompt final: persona (editável) + contexto do lead + tabela de
+// disponibilidade (calculada a cada turno, vem por último igual buildDateBlock
+// no fisio-secretary — mantém o prefixo estático, habilita cache) + formato JSON.
+function buildSystemPrompt(basePrompt: string, lead: Lead | null | undefined, availabilityBlock?: string): string {
+  const availabilitySection = availabilityBlock
+    ? `\n\n# HORÁRIOS DISPONÍVEIS (agenda real do Marcel, atualizada agora)\n${availabilityBlock}`
+    : '';
+  return `${basePrompt}\n${buildLeadContext(lead)}${availabilitySection}\n\n${SDR_JSON_FORMAT}`;
 }
 
-/** Volume mínimo de mensagens/dia pra ser considerado qualificado — abaixo disso, desqualifica mesmo vendendo cabelo. */
-export const MIN_MENSAGENS_POR_DIA = 10;
-
 /**
- * Mapeia a resposta de qualificação (vende cabelo) + estágio da conversa pra
- * raia do Kanban. `vendeCabelo` é a "verdade" da qualificação: true → qualificado
- * direto (MQL), false → não qualificado. Investir em anúncio NÃO muda de raia,
- * só soma a tag "mql_premium" (ver sdr.controller.ts).
- *
- * Desqualifica também (mesmo vendendo cabelo) quando o lead é "iniciante"
- * (ainda não vende de verdade, só começando) ou recebe menos de
- * MIN_MENSAGENS_POR_DIA mensagens/dia — não vale a pena pro negócio ainda.
+ * Mapeia a resposta da pergunta única (dona de schedule?) + estágio da
+ * conversa pra raia do Kanban. Todo lead que fala com a Clara já veio
+ * pré-qualificado pelo anúncio — não existe desqualificação aqui, só a
+ * diferenciação entre "qualificado" (já é dona do próprio schedule) e
+ * "atendimento" (ainda helper, ou ainda não respondeu a pergunta única).
  */
 export function deriveKanbanStage(
-  vendeCabelo: boolean | null | undefined,
+  donaDeSchedule: boolean | null | undefined,
   stage: SdrStage,
   status: string | undefined,
-  mensagensPorDia?: number | null,
-  iniciante?: boolean | null,
 ): KanbanStage {
   if (status === 'perdido' || stage === 'perdido') return 'perdido';
-  if (vendeCabelo === false) return 'nao-qualificado';
-  if (iniciante === true) return 'nao-qualificado';
-  if (typeof mensagensPorDia === 'number' && mensagensPorDia < MIN_MENSAGENS_POR_DIA) return 'nao-qualificado';
-  if (vendeCabelo === true) return 'qualificado';
+  if (donaDeSchedule === true) return 'qualificado';
   if (stage === 'abertura') return 'novo';
   return 'atendimento';
 }
@@ -86,7 +79,7 @@ export class SdrService {
     this.model = config.get('SDR_OPENAI_MODEL') || 'gpt-5.4-mini';
   }
 
-  async processMessage(lead: Lead, incomingText: string): Promise<SdrResponse> {
+  async processMessage(lead: Lead, incomingText: string, availabilityBlock?: string): Promise<SdrResponse> {
     // Sanitiza roles inválidos de versões anteriores (ex.: 'lead', 'gabi')
     const rawHistory: any[] = (lead.aiContext as any[]) ?? [];
     const history: OpenAI.Chat.ChatCompletionMessageParam[] = rawHistory.map((m) => ({
@@ -99,7 +92,7 @@ export class SdrService {
     const model = (await this.settings.get(SDR_MODEL_KEY)) || this.model;
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: buildSystemPrompt(basePrompt, lead) },
+      { role: 'system', content: buildSystemPrompt(basePrompt, lead, availabilityBlock) },
       ...history,
       { role: 'user', content: incomingText },
     ];
@@ -143,7 +136,7 @@ export class SdrService {
 
       parsed.success = true;
 
-      this.logger.log(`SDR respondeu [stage=${parsed.stage}, temp=${parsed.temperature}, vendeCabelo=${parsed.vendeCabelo}, mensagensPorDia=${parsed.mensagensPorDia}]: ${parsed.reply}`);
+      this.logger.log(`SDR respondeu [stage=${parsed.stage}, temp=${parsed.temperature}, donaDeSchedule=${parsed.donaDeSchedule}, action=${parsed.action}]: ${parsed.reply}`);
       return parsed;
     } catch (err: any) {
       this.logger.error(`Erro no SDR: ${err.message}`);

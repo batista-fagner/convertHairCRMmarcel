@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Calendar } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
@@ -86,10 +86,10 @@ function ChatSimulator() {
         content: data.reply,
         stage: data.stage,
         temperature: data.temperature,
-        vendeCabelo: data.vendeCabelo,
-        mensagensPorDia: data.mensagensPorDia,
-        instagram: data.instagram,
-        semInstagram: data.semInstagram,
+        donaDeSchedule: data.donaDeSchedule,
+        action: data.action,
+        appointmentDateTime: data.appointmentDateTime,
+        shouldIgnore: data.shouldIgnore,
       }])
       setLastStage(data.stage)
       setLastTemp(data.temperature)
@@ -116,7 +116,7 @@ function ChatSimulator() {
             <Bot className="w-4 h-4 text-white" />
           </div>
           <div>
-            <p className="text-sm font-medium text-slate-800">Sofia</p>
+            <p className="text-sm font-medium text-slate-800">Clara</p>
             <p className="text-[10px] text-slate-400">Simulador de conversa</p>
           </div>
         </div>
@@ -135,7 +135,7 @@ function ChatSimulator() {
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 gap-2">
             <MessageCircle className="w-8 h-8 opacity-30" />
-            <p className="text-sm">Mande uma mensagem para testar a Sofia</p>
+            <p className="text-sm">Mande uma mensagem para testar a Clara</p>
           </div>
         )}
         {messages.map((msg, i) => (
@@ -146,21 +146,16 @@ function ChatSimulator() {
                 : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
             }`}>
               {msg.content}
-              {(msg.vendeCabelo !== undefined && msg.vendeCabelo !== null) && (
-                <p className={`text-[10px] mt-1 font-medium ${msg.vendeCabelo ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {msg.vendeCabelo ? '✓ Vende cabelo' : '✗ Não vende cabelo'}
+              {(msg.donaDeSchedule !== undefined && msg.donaDeSchedule !== null) && (
+                <p className={`text-[10px] mt-1 font-medium ${msg.donaDeSchedule ? 'text-emerald-600' : 'text-slate-500'}`}>
+                  {msg.donaDeSchedule ? '✓ Dona do próprio schedule' : '— Ainda helper'}
                 </p>
               )}
-              {(msg.mensagensPorDia !== undefined && msg.mensagensPorDia !== null) && (
-                <p className={`text-[10px] mt-0.5 font-medium ${msg.mensagensPorDia >= 30 ? 'text-violet-600' : 'text-slate-500'}`}>
-                  {msg.mensagensPorDia >= 30 ? `✓ ~${msg.mensagensPorDia} msgs/dia (MQL premium)` : `— ~${msg.mensagensPorDia} msgs/dia (MQL básico)`}
-                </p>
+              {msg.action === 'schedule' && msg.appointmentDateTime && (
+                <p className="text-[10px] mt-0.5 font-medium text-violet-600">📅 Agendado: {msg.appointmentDateTime}</p>
               )}
-              {msg.instagram && (
-                <p className="text-[10px] mt-0.5 font-medium text-blue-600">✓ Instagram: @{msg.instagram}</p>
-              )}
-              {msg.semInstagram && (
-                <p className="text-[10px] mt-0.5 font-medium text-slate-500">✓ Sem Instagram</p>
+              {msg.shouldIgnore && (
+                <p className="text-[10px] mt-0.5 font-medium text-red-500">⚠️ Encaminhado pra humano</p>
               )}
             </div>
           </div>
@@ -302,7 +297,7 @@ function SdrPromptEditor() {
       <div className="flex items-center justify-between mb-3 shrink-0">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-violet-600" />
-          <p className="font-semibold text-slate-800 text-sm">Prompt da IA SDR (Sofia)</p>
+          <p className="font-semibold text-slate-800 text-sm">Prompt da IA SDR (Clara)</p>
           {isCustom ? (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Personalizado</span>
           ) : (
@@ -324,13 +319,13 @@ function SdrPromptEditor() {
           ) : (
             <>
               <div className="px-3 pt-3 flex-1 flex flex-col min-h-0">
-                <p className="text-[10px] text-slate-400 mb-1.5">Edite a personalidade e as regras da Sofia</p>
+                <p className="text-[10px] text-slate-400 mb-1.5">Edite a personalidade e as regras da Clara</p>
                 <textarea
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   spellCheck={false}
                   className="flex-1 text-sm text-slate-700 border border-slate-200 rounded-lg p-3 font-mono leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-violet-300"
-                  placeholder="Escreva aqui o prompt da Sofia..."
+                  placeholder="Escreva aqui o prompt da Clara..."
                 />
               </div>
               <div className="flex items-center justify-between px-3 py-2.5 border-t border-slate-100 shrink-0">
@@ -480,7 +475,7 @@ function IgCatchallEditor() {
               <input
                 value={buttonLabel}
                 onChange={(e) => setButtonLabel(e.target.value)}
-                placeholder="Ex: Falar com a Sofia"
+                placeholder="Ex: Falar com a Clara"
                 className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
               />
             </div>
@@ -775,7 +770,7 @@ function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, on
             <div className="mb-4 bg-violet-50 rounded-lg p-3 border border-violet-100">
               <div className="flex items-center gap-1.5 mb-1">
                 <Sparkles className="w-3.5 h-3.5 text-violet-500" />
-                <p className="text-xs font-medium text-violet-700">A Sofia vai gerar</p>
+                <p className="text-xs font-medium text-violet-700">A Clara vai gerar</p>
               </div>
               <p className="text-xs text-violet-600">
                 A IA analisa toda a conversa até aquele ponto e cria uma mensagem personalizada para reativar o interesse do lead, sem pressão e de forma natural.
@@ -1326,6 +1321,211 @@ function NotifyPhonesConfig() {
   )
 }
 
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: 'Domingo' },
+  { value: 1, label: 'Segunda-feira' },
+  { value: 2, label: 'Terça-feira' },
+  { value: 3, label: 'Quarta-feira' },
+  { value: 4, label: 'Quinta-feira' },
+  { value: 5, label: 'Sexta-feira' },
+  { value: 6, label: 'Sábado' },
+]
+
+const EMPTY_AVAILABILITY_RULE = { dayOfWeek: 1, startTime: '08:00', endTime: '18:00', slotMinutes: 60, active: true }
+
+function AvailabilityRuleForm({ initial, onCancel, onSaved }) {
+  const [rule, setRule] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const isEdit = !!initial.id
+
+  const save = async () => {
+    if (!rule.startTime || !rule.endTime) { setError('Preencha horário de início e fim'); return }
+    setSaving(true); setError('')
+    try {
+      const payload = {
+        dayOfWeek: Number(rule.dayOfWeek),
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+        slotMinutes: Number(rule.slotMinutes) || 60,
+        active: rule.active !== false,
+      }
+      const res = await fetch(`${API}/availability/rules${isEdit ? `/${initial.id}` : ''}`, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('Falha ao salvar')
+      onSaved('Horário salvo!')
+    } catch (err) {
+      setError(err.message || 'Erro ao salvar')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-violet-50/50 border border-violet-200 rounded-lg p-3 mb-2 space-y-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <select
+          value={rule.dayOfWeek}
+          onChange={e => setRule(r => ({ ...r, dayOfWeek: e.target.value }))}
+          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5"
+        >
+          {WEEKDAY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <input
+          type="time"
+          value={rule.startTime}
+          onChange={e => setRule(r => ({ ...r, startTime: e.target.value }))}
+          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5"
+        />
+        <input
+          type="time"
+          value={rule.endTime}
+          onChange={e => setRule(r => ({ ...r, endTime: e.target.value }))}
+          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5"
+        />
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            min="15"
+            step="15"
+            value={rule.slotMinutes}
+            onChange={e => setRule(r => ({ ...r, slotMinutes: e.target.value }))}
+            className="w-16 text-xs border border-slate-200 rounded-lg px-2 py-1.5"
+          />
+          <span className="text-[11px] text-slate-400">min/slot</span>
+        </div>
+      </div>
+      {error && <p className="text-[11px] text-red-600">{error}</p>}
+      <div className="flex items-center justify-end gap-2">
+        <button onClick={onCancel} className="text-xs text-slate-500 hover:underline">Cancelar</button>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
+        >
+          {saving ? 'Salvando...' : 'Salvar'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AvailabilityRules() {
+  const [rules, setRules] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [editingId, setEditingId] = useState(null) // null = fechado, 'new' = criando, id = editando
+  const [toast, setToast] = useState('')
+
+  const load = () => {
+    setLoading(true)
+    fetch(`${API}/availability/rules`)
+      .then(r => r.json())
+      .then(data => setRules(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [])
+
+  const toggleActive = async (rule) => {
+    await fetch(`${API}/availability/rules/${rule.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !rule.active }),
+    })
+    load()
+  }
+
+  const remove = async (rule) => {
+    const label = WEEKDAY_OPTIONS.find(o => o.value === rule.dayOfWeek)?.label
+    if (!confirm(`Remover esse horário (${label}, ${rule.startTime}-${rule.endTime})?`)) return
+    await fetch(`${API}/availability/rules/${rule.id}`, { method: 'DELETE' })
+    load()
+  }
+
+  const onSaved = (msg) => {
+    setEditingId(null)
+    if (msg) { setToast(msg); setTimeout(() => setToast(''), 3000) }
+    load()
+  }
+
+  if (loading) return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex items-center gap-2 text-slate-400">
+      <Loader2 className="w-4 h-4 animate-spin" /> Carregando disponibilidade...
+    </div>
+  )
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-violet-600" />
+          <p className="font-semibold text-slate-800 text-sm">Disponibilidade do Marcel (agenda da Clara)</p>
+        </div>
+        {editingId !== 'new' && (
+          <button
+            onClick={() => setEditingId('new')}
+            className="flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-700 transition"
+          >
+            <Plus className="w-3.5 h-3.5" /> Novo horário
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-slate-400 mb-4">
+        Dias e horários em que o Marcel está disponível pra Sessões de Mentoria — a Clara só oferece e confirma agendamento dentro dessas janelas, nunca inventa horário.
+      </p>
+
+      {toast && (
+        <div className="mb-4 flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+          <CheckCircle2 className="w-3.5 h-3.5" /> {toast}
+        </div>
+      )}
+
+      {editingId === 'new' && (
+        <AvailabilityRuleForm initial={EMPTY_AVAILABILITY_RULE} onCancel={() => setEditingId(null)} onSaved={onSaved} />
+      )}
+
+      {rules.length === 0 && editingId !== 'new' && (
+        <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg p-4 text-center">
+          Nenhum horário cadastrado ainda — a Clara vai só dizer que a equipe entra em contato, sem marcar dia/hora.
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {rules.map(rule => (
+          editingId === rule.id ? (
+            <AvailabilityRuleForm key={rule.id} initial={rule} onCancel={() => setEditingId(null)} onSaved={onSaved} />
+          ) : (
+            <div key={rule.id} className="flex items-center justify-between border border-slate-200 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-3 text-sm">
+                <span className={`font-medium ${rule.active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>
+                  {WEEKDAY_OPTIONS.find(o => o.value === rule.dayOfWeek)?.label}
+                </span>
+                <span className="text-slate-500 text-xs">{rule.startTime} – {rule.endTime}</span>
+                <span className="text-slate-400 text-xs">({rule.slotMinutes}min/slot)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => toggleActive(rule)} title={rule.active ? 'Desativar' : 'Ativar'}>
+                  {rule.active ? <ToggleRight className="w-5 h-5 text-violet-600" /> : <ToggleLeft className="w-5 h-5 text-slate-300" />}
+                </button>
+                <button onClick={() => setEditingId(rule.id)} className="text-slate-400 hover:text-violet-600 transition">
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => remove(rule)} className="text-slate-400 hover:text-red-600 transition">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Settings() {
   return (
     <div className="p-6 overflow-y-auto">
@@ -1339,6 +1539,8 @@ export default function Settings() {
       <IgCatchallEditor />
 
       <NotifyPhonesConfig />
+
+      <AvailabilityRules />
 
       <FollowupRules />
 

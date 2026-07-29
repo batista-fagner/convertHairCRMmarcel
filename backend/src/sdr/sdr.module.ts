@@ -14,7 +14,8 @@ import { LeadsModule } from '../leads/leads.module';
 import { FacebookModule } from '../facebook/facebook.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { SettingsModule } from '../settings/settings.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { AvailabilityModule } from '../availability/availability.module';
+import { AppointmentsModule } from '../appointments/appointments.module';
 
 @Module({
   imports: [
@@ -24,7 +25,8 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
     FacebookModule,
     RealtimeModule,
     SettingsModule,
-    EnrichmentModule,
+    AvailabilityModule,
+    AppointmentsModule,
   ],
   controllers: [SdrController, FollowupController, ManualMessageController],
   providers: [SdrService, SdrFollowupService, FollowupVideoService],
