@@ -4,11 +4,12 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not } from 'typeorm';
 import OpenAI from 'openai';
 import { Lead } from '../common/entities/lead.entity';
 import { FollowupRule } from '../common/entities/followup-rule.entity';
 import { FollowupVideo } from '../common/entities/followup-video.entity';
+import { Appointment } from '../common/entities/appointment.entity';
 import { SettingsService } from '../settings/settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SDR_MODEL_KEY } from './sdr.prompt';
@@ -45,7 +46,7 @@ const CADENCE_WINDOW: { weekday: CadenceWindow; saturday: CadenceWindow; sunday:
 };
 
 // STOP determinístico (camada 1) — pausa a cadência na hora, sem depender da
-// IA. A camada 2 (semântica) é o próprio ai.stage === 'perdido' do Sofia,
+// IA. A camada 2 (semântica) é o próprio ai.stage === 'perdido' da Clara,
 // tratada no sdr.controller.ts.
 const STOP_CADENCE_REGEX = /\bstop\b|\bpare\b|\bparar\b|cancela|n[aã]o\s+tenho\s+interesse|sem\s+interesse/i;
 
@@ -74,6 +75,8 @@ export class SdrFollowupService {
     private rulesRepo: Repository<FollowupRule>,
     @InjectRepository(FollowupVideo)
     private videoRepo: Repository<FollowupVideo>,
+    @InjectRepository(Appointment)
+    private appointmentsRepo: Repository<Appointment>,
     private settings: SettingsService,
     private http: HttpService,
     private config: ConfigService,
@@ -342,9 +345,11 @@ export class SdrFollowupService {
   }
 
   // A cada minuto: dispara os toques de cadência vencidos (nextNurtureAt <= agora),
-  // só dentro da janela de horário configurada. Reaproveita generateAiFollowup
-  // (mesma geração SPIN-aware já usada pelo follow-up de 1 disparo só) e sendFollowup
-  // (mesmo envio + registro no histórico) — só a orquestração de múltiplos toques é nova.
+  // só dentro da janela de horário configurada. Antes de cada toque, checa se o
+  // lead já tem um agendamento real (tabela appointments) — se tiver, encerra a
+  // cadência sem mandar nada (ela já resolveu sozinha, perguntar de novo seria
+  // deselegante). Reaproveita sendFollowup (mesmo envio + registro no histórico)
+  // — só a orquestração de múltiplos toques + a mensagem são novas.
   @Cron(CronExpression.EVERY_MINUTE)
   async processNurtureCadence(): Promise<void> {
     if (!this.isWithinCadenceWindow()) return;
@@ -369,6 +374,17 @@ export class SdrFollowupService {
         continue;
       }
 
+      // Já tem agendamento real (qualquer status que não seja cancelado) →
+      // ela já resolveu sozinha, encerra a cadência sem perguntar de novo.
+      const alreadyBooked = await this.appointmentsRepo.exist({
+        where: { leadId: lead.id, status: Not('cancelado') },
+      });
+      if (alreadyBooked) {
+        await this.leadsRepo.update(lead.id, { nextNurtureAt: null });
+        this.logger.log(`[CADENCE] Lead ${lead.phone} já tem agendamento — cadência encerrada sem enviar`);
+        continue;
+      }
+
       // Claim atômico: só segue quem conseguiu mover nextNurtureAt nesta execução
       // (evita disparo duplicado se o cron se sobrepuser).
       const claim = await this.leadsRepo
@@ -384,7 +400,7 @@ export class SdrFollowupService {
       const nextNurtureAt = nextOffset != null ? new Date(Date.now() + nextOffset * 60_000) : null;
       await this.leadsRepo.update(lead.id, { nextNurtureAt });
 
-      const message = await this.generateAiFollowup(lead, offsetMinutes);
+      const message = await this.generateScheduleReminderFollowup(lead, offsetMinutes);
       if (!message) continue;
 
       if (sent > 0) {
@@ -584,6 +600,60 @@ ${tomBlock}`;
       return response.choices[0].message.content?.trim() ?? '';
     } catch (err: any) {
       this.logger.error(`[Followup] Erro ao gerar follow-up para ${lead.phone}: ${err.message}`);
+      return '';
+    }
+  }
+
+  /**
+   * Follow-up da cadência de agendamento (Clara/Pro Cleaning): usado quando o
+   * lead já foi qualificado (pergunta única respondida) e a Clara já ofereceu
+   * horários da agenda, mas ele ainda não confirmou nenhum. NÃO reaproveita
+   * generateAiFollowup acima (esse é específico do domínio antigo — hair/SPIN).
+   * Aqui a única missão é perguntar, com educação, se ela já conseguiu ver os
+   * horários e escolher um — nunca repetir a lista inteira de novo, nem soar
+   * como cobrança. A checagem de "já agendou" já aconteceu antes (ver
+   * processNurtureCadence) — chegando aqui, sabemos que ainda não tem appointment.
+   */
+  private async generateScheduleReminderFollowup(lead: Lead, delayMinutes: number): Promise<string> {
+    try {
+      const basePrompt = await this.settings.getSdrPrompt();
+      const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
+
+      const history: OpenAI.Chat.ChatCompletionMessageParam[] = (Array.isArray(lead.aiContext) ? lead.aiContext : []).map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content ?? '',
+      }));
+
+      const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
+
+      const instruction = `IMPORTANTE — ISSO NÃO É QUALIFICAÇÃO NEM REATIVAÇÃO GENÉRICA: você já ofereceu horários da agenda pra Sessão de Mentoria Gratuita com o Marcel, mas ela não confirmou nenhum ainda (faz ${hours} desde então, sem resposta).
+
+SUA ÚNICA MISSÃO: gerar UMA mensagem curta e educada perguntando se ela já conseguiu ver os horários e escolher um, se oferecendo pra ajudar a escolher. NÃO repita a lista de horários inteira de novo — só pergunte, e se ela pedir, você mostra de novo na próxima resposta (fora deste follow-up).
+
+TOM:
+- Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
+- Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
+- Trate por "vc", nunca "você" por extenso.
+- No máximo 1 emoji, só se soar natural.
+- Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
+- Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
+
+Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas ao redor.`;
+
+      const response = await this.openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: basePrompt },
+          ...history,
+          { role: 'system', content: instruction },
+        ],
+        temperature: 0.8,
+        max_completion_tokens: 150,
+      });
+
+      return response.choices[0].message.content?.trim() ?? '';
+    } catch (err: any) {
+      this.logger.error(`[Followup] Erro ao gerar lembrete de agendamento para ${lead.phone}: ${err.message}`);
       return '';
     }
   }

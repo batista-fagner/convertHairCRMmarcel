@@ -344,7 +344,7 @@ export class SdrController {
 
     await this.sendTyping(phone, 2000);
 
-    // Tabela de horários livres do Lucas, recalculada a cada mensagem — a Sofia
+    // Tabela de horários livres do Marcel, recalculada a cada mensagem — a Clara
     // só pode oferecer/confirmar horários que estão literalmente aqui.
     const availability = await this.availabilityService.buildAvailabilityBlock();
 
