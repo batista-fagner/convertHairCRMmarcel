@@ -394,7 +394,7 @@ export class SdrController {
     let bookedNow = false;
     let bookedAtDateTime: Date | null = null;
     if (readyForHandoff && !alreadyHandedOff && ai.action === 'schedule' && ai.appointmentDateTime) {
-      const parsedDateTime = this.availabilityService.parseBrtNaiveDateTime(ai.appointmentDateTime);
+      const parsedDateTime = this.availabilityService.parseNyNaiveDateTime(ai.appointmentDateTime);
       if (parsedDateTime && (await this.availabilityService.isSlotAvailable(parsedDateTime))) {
         try {
           await this.appointmentsService.create({
@@ -550,7 +550,7 @@ export class SdrController {
       ? ''
       : `\nDona do próprio schedule: ${lead.donaDeSchedule ? 'sim' : 'não (helper)'}`;
     const bookedLine = bookedAt
-      ? `\n\n📅 Já ficou AGENDADA a Sessão de Mentoria: ${bookedAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })}`
+      ? `\n\n📅 Já ficou AGENDADA a Sessão de Mentoria: ${bookedAt.toLocaleString('pt-BR', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short', hour12: true })} (horário de Nova York)`
       : '';
     const msg = `🔥 Lead da Clara (Pro Cleaning)!\n\nNome: ${lead.name}\nWhatsApp: ${lead.phone}${donaDeScheduleLine}${bookedLine}\n\nAssuma a conversa.`;
 

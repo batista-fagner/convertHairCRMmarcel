@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Trash2, Calendar, User, Phone, Tag, DollarSign, FileText } from 'lucide-react'
 import { appointmentsApi } from '../lib/appointmentsApi'
+import { toNyDateTimeLocalValue, parseNyDateTimeLocalValue } from '../lib/nyTime'
 
 const STATUS_OPTIONS = [
   { value: 'agendado',       label: 'Agendado' },
@@ -9,14 +10,6 @@ const STATUS_OPTIONS = [
   { value: 'cancelado',      label: 'Cancelado' },
   { value: 'nao_compareceu', label: 'Não compareceu' },
 ]
-
-function toDateTimeLocal(date) {
-  // Date → "YYYY-MM-DDTHH:MM" (em horário local)
-  if (!date) return ''
-  const d = new Date(date)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 export default function AppointmentModal({ appointment, defaultDate, onClose, onSaved }) {
   const isEdit = !!appointment
@@ -27,7 +20,7 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
     service:       appointment?.service ?? '',
     value:         appointment?.value ?? '',
     status:        appointment?.status ?? 'agendado',
-    startDateTime: toDateTimeLocal(appointment?.startDateTime ?? defaultDate ?? new Date()),
+    startDateTime: toNyDateTimeLocalValue(new Date(appointment?.startDateTime ?? defaultDate ?? new Date())),
     notes:         appointment?.notes ?? '',
   })
   const [saving, setSaving] = useState(false)
@@ -47,7 +40,7 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
         service: form.service.trim(),
         value: form.value === '' || form.value == null ? null : Number(form.value),
         status: form.status,
-        startDateTime: new Date(form.startDateTime).toISOString(),
+        startDateTime: parseNyDateTimeLocalValue(form.startDateTime).toISOString(),
         notes: form.notes.trim() || null,
       }
       if (isEdit) {
@@ -105,7 +98,7 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
             />
           </Field>
 
-          <Field icon={<Calendar className="w-3.5 h-3.5" />} label="Data e hora">
+          <Field icon={<Calendar className="w-3.5 h-3.5" />} label="Data e hora (horário de Nova York)">
             <input
               type="datetime-local"
               value={form.startDateTime}

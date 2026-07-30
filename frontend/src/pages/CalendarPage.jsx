@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalIcon, RefreshCw } from 'lucide-react'
 import { appointmentsApi } from '../lib/appointmentsApi'
 import AppointmentModal from '../components/AppointmentModal'
+import { nyParts, nyWallTimeToUtc, formatNyAmPm } from '../lib/nyTime'
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const MONTHS = [
@@ -55,17 +56,19 @@ export default function CalendarPage() {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
 
-  // Agrupa appointments por dia
+  // Agrupa appointments por dia — sempre pelo dia em horário de Nova York (a
+  // agenda do Marcel é em NY; agrupar pelo fuso do navegador de quem olha a
+  // tela poderia colocar um horário perto da meia-noite no dia errado).
   const apptByDay = {}
   for (const a of appointments) {
-    const day = new Date(a.startDateTime).getDate()
+    const { day } = nyParts(new Date(a.startDateTime))
     if (!apptByDay[day]) apptByDay[day] = []
     apptByDay[day].push(a)
   }
 
-  const today = new Date()
+  const todayNy = nyParts(new Date())
   const isToday = (day) =>
-    day === today.getDate() && cursor.month === today.getMonth() + 1 && cursor.year === today.getFullYear()
+    day === todayNy.day && cursor.month === todayNy.month && cursor.year === todayNy.year
 
   return (
     <div className="p-6">
@@ -76,7 +79,7 @@ export default function CalendarPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-800">Agenda</h1>
-            <p className="text-xs text-gray-500">Reuniões e agendamentos</p>
+            <p className="text-xs text-gray-500">Reuniões e agendamentos — horário de Nova York (ET)</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -130,7 +133,7 @@ export default function CalendarPage() {
               }`}
               onClick={() => {
                 if (!day) return
-                const date = new Date(cursor.year, cursor.month - 1, day, 14, 0, 0)
+                const date = nyWallTimeToUtc(cursor.year, cursor.month, day, 14, 0)
                 setModalState({ open: true, appointment: null, defaultDate: date })
               }}
             >
@@ -144,9 +147,9 @@ export default function CalendarPage() {
                   <div className="space-y-1">
                     {(apptByDay[day] || []).slice(0, 3).map(a => {
                       const dt = new Date(a.startDateTime)
-                      const hour = dt.getHours()
+                      const { hour } = nyParts(dt)
                       const period = hour < 12 ? 'manhã' : 'tarde'
-                      const timeStr = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                      const timeStr = formatNyAmPm(dt)
                       return (
                         <button
                           key={a.id}
