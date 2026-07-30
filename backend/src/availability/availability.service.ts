@@ -1,11 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, IsNull, Repository } from 'typeorm';
 import { AvailabilityRule } from '../common/entities/availability-rule.entity';
 import { Appointment } from '../common/entities/appointment.entity';
 
 export interface CreateAvailabilityRuleDto {
-  dayOfWeek: number;
+  // Um dos dois é obrigatório: specificDate (regra pra 1 dia exato do calendário,
+  // usada pela tela de Configurações) ou dayOfWeek (regra recorrente, legado).
+  specificDate?: string | null;
+  dayOfWeek?: number | null;
   startTime: string;
   endTime: string;
   slotMinutes?: number;
@@ -55,12 +58,21 @@ export class AvailabilityService {
   ) {}
 
   async listRules(): Promise<AvailabilityRule[]> {
-    return this.rulesRepo.find({ order: { dayOfWeek: 'ASC', startTime: 'ASC' } });
+    return this.rulesRepo.find({ order: { specificDate: 'ASC', dayOfWeek: 'ASC', startTime: 'ASC' } });
   }
 
   async createRule(dto: CreateAvailabilityRuleDto): Promise<AvailabilityRule> {
+    // dayOfWeek sempre preenchido (mesmo pra regra de data específica) — só pra
+    // exibir o nome do dia da semana na tela; quem decide o casamento de
+    // disponibilidade é specificDate quando presente (ver getSlotsForDate).
+    const specificDate = dto.specificDate ?? null;
+    const dayOfWeek = specificDate
+      ? new Date(`${specificDate}T00:00:00Z`).getUTCDay()
+      : dto.dayOfWeek ?? null;
+
     const rule = this.rulesRepo.create({
-      dayOfWeek: dto.dayOfWeek,
+      specificDate,
+      dayOfWeek,
       startTime: dto.startTime,
       endTime: dto.endTime,
       slotMinutes: dto.slotMinutes ?? 60,
@@ -72,6 +84,10 @@ export class AvailabilityService {
   async updateRule(id: string, dto: UpdateAvailabilityRuleDto): Promise<AvailabilityRule> {
     const rule = await this.rulesRepo.findOne({ where: { id } });
     if (!rule) throw new NotFoundException('Regra de disponibilidade não encontrada');
+    if (dto.specificDate !== undefined) {
+      rule.specificDate = dto.specificDate ?? null;
+      if (rule.specificDate) rule.dayOfWeek = new Date(`${rule.specificDate}T00:00:00Z`).getUTCDay();
+    }
     if (dto.dayOfWeek !== undefined) rule.dayOfWeek = dto.dayOfWeek;
     if (dto.startTime !== undefined) rule.startTime = dto.startTime;
     if (dto.endTime !== undefined) rule.endTime = dto.endTime;
@@ -88,7 +104,15 @@ export class AvailabilityService {
   /** Slots livres ("HH:MM") pra uma data (Y-M-D) — já descontando agendamentos existentes e horários passados (se for hoje). */
   async getSlotsForDate(year: number, month: number, day: number): Promise<string[]> {
     const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-    const rules = await this.rulesRepo.find({ where: { dayOfWeek, active: true } });
+    const dateStr = `${year}-${pad(month)}-${pad(day)}`;
+    // Uma regra vale pro dia se: specificDate bate exatamente com essa data, OU
+    // (specificDate é null E dayOfWeek recorrente bate) — data específica nunca
+    // "vaza" pra outras semanas, dayOfWeek é só o legado recorrente.
+    const [specificRules, recurringRules] = await Promise.all([
+      this.rulesRepo.find({ where: { specificDate: dateStr, active: true } }),
+      this.rulesRepo.find({ where: { dayOfWeek, specificDate: IsNull(), active: true } }),
+    ]);
+    const rules = [...specificRules, ...recurringRules];
     if (!rules.length) return [];
 
     const raw: string[] = [];

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Calendar } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
@@ -1321,42 +1321,32 @@ function NotifyPhonesConfig() {
   )
 }
 
-const WEEKDAY_OPTIONS = [
-  { value: 0, label: 'Domingo' },
-  { value: 1, label: 'Segunda-feira' },
-  { value: 2, label: 'Terça-feira' },
-  { value: 3, label: 'Quarta-feira' },
-  { value: 4, label: 'Quinta-feira' },
-  { value: 5, label: 'Sexta-feira' },
-  { value: 6, label: 'Sábado' },
+const AVAILABILITY_WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+const AVAILABILITY_MONTHS = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
 
-const EMPTY_AVAILABILITY_RULE = { dayOfWeek: 1, startTime: '08:00', endTime: '18:00', slotMinutes: 60, active: true }
+function pad2(n) { return String(n).padStart(2, '0') }
 
-function AvailabilityRuleForm({ initial, onCancel, onSaved }) {
-  const [rule, setRule] = useState(initial)
+function AvailabilityDayModal({ dateStr, dayLabel, rulesForDay, onClose, onChanged }) {
+  const [startTime, setStartTime] = useState('08:00')
+  const [endTime, setEndTime] = useState('18:00')
+  const [slotMinutes, setSlotMinutes] = useState(60)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const isEdit = !!initial.id
 
-  const save = async () => {
-    if (!rule.startTime || !rule.endTime) { setError('Preencha horário de início e fim'); return }
+  const addRange = async () => {
+    if (!startTime || !endTime) { setError('Preencha início e fim'); return }
     setSaving(true); setError('')
     try {
-      const payload = {
-        dayOfWeek: Number(rule.dayOfWeek),
-        startTime: rule.startTime,
-        endTime: rule.endTime,
-        slotMinutes: Number(rule.slotMinutes) || 60,
-        active: rule.active !== false,
-      }
-      const res = await fetch(`${API}/availability/rules${isEdit ? `/${initial.id}` : ''}`, {
-        method: isEdit ? 'PATCH' : 'POST',
+      const res = await fetch(`${API}/availability/rules`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ specificDate: dateStr, startTime, endTime, slotMinutes: Number(slotMinutes) || 60 }),
       })
       if (!res.ok) throw new Error('Falha ao salvar')
-      onSaved('Horário salvo!')
+      onChanged()
     } catch (err) {
       setError(err.message || 'Erro ao salvar')
     } finally {
@@ -1364,60 +1354,113 @@ function AvailabilityRuleForm({ initial, onCancel, onSaved }) {
     }
   }
 
+  const toggleActive = async (rule) => {
+    await fetch(`${API}/availability/rules/${rule.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !rule.active }),
+    })
+    onChanged()
+  }
+
+  const removeRange = async (rule) => {
+    if (!confirm(`Remover o horário ${rule.startTime}-${rule.endTime}?`)) return
+    await fetch(`${API}/availability/rules/${rule.id}`, { method: 'DELETE' })
+    onChanged()
+  }
+
   return (
-    <div className="bg-violet-50/50 border border-violet-200 rounded-lg p-3 mb-2 space-y-2">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <select
-          value={rule.dayOfWeek}
-          onChange={e => setRule(r => ({ ...r, dayOfWeek: e.target.value }))}
-          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5"
-        >
-          {WEEKDAY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <input
-          type="time"
-          value={rule.startTime}
-          onChange={e => setRule(r => ({ ...r, startTime: e.target.value }))}
-          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5"
-        />
-        <input
-          type="time"
-          value={rule.endTime}
-          onChange={e => setRule(r => ({ ...r, endTime: e.target.value }))}
-          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5"
-        />
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            min="15"
-            step="15"
-            value={rule.slotMinutes}
-            onChange={e => setRule(r => ({ ...r, slotMinutes: e.target.value }))}
-            className="w-16 text-xs border border-slate-200 rounded-lg px-2 py-1.5"
-          />
-          <span className="text-[11px] text-slate-400">min/slot</span>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="font-bold text-gray-800 capitalize">{dayLabel}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      </div>
-      {error && <p className="text-[11px] text-red-600">{error}</p>}
-      <div className="flex items-center justify-end gap-2">
-        <button onClick={onCancel} className="text-xs text-slate-500 hover:underline">Cancelar</button>
-        <button
-          onClick={save}
-          disabled={saving}
-          className="text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition"
-        >
-          {saving ? 'Salvando...' : 'Salvar'}
-        </button>
+
+        <div className="p-6 space-y-4">
+          {rulesForDay.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Horários cadastrados</p>
+              {rulesForDay.map(r => (
+                <div key={r.id} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2">
+                  <div className="text-sm">
+                    <span className={r.active ? 'text-gray-800 font-medium' : 'text-gray-400 line-through'}>{r.startTime} – {r.endTime}</span>
+                    <span className="text-gray-400 text-xs ml-2">({r.slotMinutes}min/slot)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => toggleActive(r)} title={r.active ? 'Desativar' : 'Ativar'}>
+                      {r.active ? <ToggleRight className="w-5 h-5 text-violet-600" /> : <ToggleLeft className="w-5 h-5 text-gray-300" />}
+                    </button>
+                    <button onClick={() => removeRange(r)} className="text-gray-400 hover:text-red-600 transition">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Adicionar horário</p>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="time"
+                value={startTime}
+                onChange={e => setStartTime(e.target.value)}
+                className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+              <input
+                type="time"
+                value={endTime}
+                onChange={e => setEndTime(e.target.value)}
+                className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="15"
+                  step="15"
+                  value={slotMinutes}
+                  onChange={e => setSlotMinutes(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <span className="text-[10px] text-gray-400 shrink-0">min</span>
+              </div>
+            </div>
+            {error && <p className="text-[11px] text-red-600 mt-1">{error}</p>}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100 bg-gray-50">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition">
+            Fechar
+          </button>
+          <button
+            onClick={addRange}
+            disabled={saving}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition"
+          >
+            {saving ? 'Salvando...' : 'Adicionar horário'}
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
-function AvailabilityRules() {
+function AvailabilityCalendar() {
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date()
+    return { year: d.getFullYear(), month: d.getMonth() + 1 }
+  })
   const [rules, setRules] = useState([])
   const [loading, setLoading] = useState(true)
-  const [editingId, setEditingId] = useState(null) // null = fechado, 'new' = criando, id = editando
-  const [toast, setToast] = useState('')
+  const [selectedDate, setSelectedDate] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -1430,98 +1473,105 @@ function AvailabilityRules() {
 
   useEffect(() => { load() }, [])
 
-  const toggleActive = async (rule) => {
-    await fetch(`${API}/availability/rules/${rule.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: !rule.active }),
-    })
-    load()
+  const prevMonth = () => setCursor(c => c.month === 1 ? { year: c.year - 1, month: 12 } : { year: c.year, month: c.month - 1 })
+  const nextMonth = () => setCursor(c => c.month === 12 ? { year: c.year + 1, month: 1 } : { year: c.year, month: c.month + 1 })
+
+  const firstOfMonth = new Date(cursor.year, cursor.month - 1, 1)
+  const daysInMonth = new Date(cursor.year, cursor.month, 0).getDate()
+  const startWeekday = firstOfMonth.getDay()
+  const cells = []
+  for (let i = 0; i < startWeekday; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  const rulesByDate = {}
+  for (const r of rules) {
+    if (!r.specificDate) continue
+    const key = r.specificDate.slice(0, 10)
+    if (!rulesByDate[key]) rulesByDate[key] = []
+    rulesByDate[key].push(r)
   }
 
-  const remove = async (rule) => {
-    const label = WEEKDAY_OPTIONS.find(o => o.value === rule.dayOfWeek)?.label
-    if (!confirm(`Remover esse horário (${label}, ${rule.startTime}-${rule.endTime})?`)) return
-    await fetch(`${API}/availability/rules/${rule.id}`, { method: 'DELETE' })
-    load()
-  }
+  const today = new Date()
+  const isToday = (day) => day === today.getDate() && cursor.month === today.getMonth() + 1 && cursor.year === today.getFullYear()
+  const dateStrFor = (day) => `${cursor.year}-${pad2(cursor.month)}-${pad2(day)}`
 
-  const onSaved = (msg) => {
-    setEditingId(null)
-    if (msg) { setToast(msg); setTimeout(() => setToast(''), 3000) }
-    load()
-  }
-
-  if (loading) return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex items-center gap-2 text-slate-400">
-      <Loader2 className="w-4 h-4 animate-spin" /> Carregando disponibilidade...
-    </div>
-  )
+  const selectedRules = selectedDate ? (rulesByDate[selectedDate] || []) : []
+  const selectedLabel = selectedDate
+    ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+    : ''
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-violet-600" />
-          <p className="font-semibold text-slate-800 text-sm">Disponibilidade do Marcel (agenda da Clara)</p>
-        </div>
-        {editingId !== 'new' && (
-          <button
-            onClick={() => setEditingId('new')}
-            className="flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-700 transition"
-          >
-            <Plus className="w-3.5 h-3.5" /> Novo horário
-          </button>
-        )}
+      <div className="flex items-center gap-2 mb-2">
+        <Calendar className="w-4 h-4 text-violet-600" />
+        <p className="font-semibold text-slate-800 text-sm">Disponibilidade do Marcel (agenda da Clara)</p>
       </div>
       <p className="text-xs text-slate-400 mb-4">
-        Dias e horários em que o Marcel está disponível pra Sessões de Mentoria — a Clara só oferece e confirma agendamento dentro dessas janelas, nunca inventa horário.
+        Clique num dia do calendário pra marcar os horários disponíveis pra Sessão de Mentoria naquela data — a Clara só oferece e confirma agendamento dentro do que estiver aqui, nunca inventa horário.
       </p>
 
-      {toast && (
-        <div className="mb-4 flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-          <CheckCircle2 className="w-3.5 h-3.5" /> {toast}
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 text-slate-400 text-sm py-8">
+          <Loader2 className="w-4 h-4 animate-spin" /> Carregando disponibilidade...
+        </div>
+      ) : (
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <button onClick={prevMonth} className="p-1.5 hover:bg-slate-200 rounded-lg transition">
+              <ChevronLeft className="w-4 h-4 text-slate-500" />
+            </button>
+            <p className="text-sm font-bold text-slate-800">
+              {AVAILABILITY_MONTHS[cursor.month - 1]} <span className="font-normal text-slate-400">{cursor.year}</span>
+            </p>
+            <button onClick={nextMonth} className="p-1.5 hover:bg-slate-200 rounded-lg transition">
+              <ChevronRight className="w-4 h-4 text-slate-500" />
+            </button>
+          </div>
+          <div className="grid grid-cols-7 border-b border-slate-100">
+            {AVAILABILITY_WEEKDAYS_SHORT.map(w => (
+              <div key={w} className="text-center py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{w}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {cells.map((day, i) => {
+              const dateStr = day ? dateStrFor(day) : null
+              const dayRules = dateStr ? (rulesByDate[dateStr] || []) : []
+              const activeCount = dayRules.filter(r => r.active).length
+              return (
+                <div
+                  key={i}
+                  onClick={() => day && setSelectedDate(dateStr)}
+                  className={`min-h-[68px] border-r border-b border-slate-100 p-1.5 ${!day ? 'bg-slate-50/50' : 'hover:bg-violet-50/40 cursor-pointer transition'}`}
+                >
+                  {day && (
+                    <>
+                      <div className={`text-xs font-semibold mb-1 w-5 h-5 flex items-center justify-center rounded-full ${isToday(day) ? 'bg-violet-600 text-white' : 'text-slate-600'}`}>
+                        {day}
+                      </div>
+                      {activeCount > 0 && (
+                        <span className="text-[9px] bg-violet-100 text-violet-700 rounded px-1 py-0.5 inline-block">
+                          {activeCount} horário{activeCount > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
-      {editingId === 'new' && (
-        <AvailabilityRuleForm initial={EMPTY_AVAILABILITY_RULE} onCancel={() => setEditingId(null)} onSaved={onSaved} />
+      {selectedDate && (
+        <AvailabilityDayModal
+          dateStr={selectedDate}
+          dayLabel={selectedLabel}
+          rulesForDay={selectedRules}
+          onClose={() => setSelectedDate(null)}
+          onChanged={load}
+        />
       )}
-
-      {rules.length === 0 && editingId !== 'new' && (
-        <p className="text-[11px] text-slate-400 bg-slate-50 rounded-lg p-4 text-center">
-          Nenhum horário cadastrado ainda — a Clara vai só dizer que a equipe entra em contato, sem marcar dia/hora.
-        </p>
-      )}
-
-      <div className="space-y-2">
-        {rules.map(rule => (
-          editingId === rule.id ? (
-            <AvailabilityRuleForm key={rule.id} initial={rule} onCancel={() => setEditingId(null)} onSaved={onSaved} />
-          ) : (
-            <div key={rule.id} className="flex items-center justify-between border border-slate-200 rounded-lg px-3 py-2">
-              <div className="flex items-center gap-3 text-sm">
-                <span className={`font-medium ${rule.active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>
-                  {WEEKDAY_OPTIONS.find(o => o.value === rule.dayOfWeek)?.label}
-                </span>
-                <span className="text-slate-500 text-xs">{rule.startTime} – {rule.endTime}</span>
-                <span className="text-slate-400 text-xs">({rule.slotMinutes}min/slot)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => toggleActive(rule)} title={rule.active ? 'Desativar' : 'Ativar'}>
-                  {rule.active ? <ToggleRight className="w-5 h-5 text-violet-600" /> : <ToggleLeft className="w-5 h-5 text-slate-300" />}
-                </button>
-                <button onClick={() => setEditingId(rule.id)} className="text-slate-400 hover:text-violet-600 transition">
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={() => remove(rule)} className="text-slate-400 hover:text-red-600 transition">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          )
-        ))}
-      </div>
     </div>
   )
 }
@@ -1540,7 +1590,7 @@ export default function Settings() {
 
       <NotifyPhonesConfig />
 
-      <AvailabilityRules />
+      <AvailabilityCalendar />
 
       <FollowupRules />
 

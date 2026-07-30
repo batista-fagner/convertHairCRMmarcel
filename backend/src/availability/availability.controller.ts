@@ -13,8 +13,11 @@ export class AvailabilityController {
 
   @Post('rules')
   createRule(@Body() dto: CreateAvailabilityRuleDto) {
-    if (dto.dayOfWeek == null || !dto.startTime || !dto.endTime) {
-      throw new BadRequestException('dayOfWeek, startTime e endTime são obrigatórios');
+    if (!dto.specificDate && dto.dayOfWeek == null) {
+      throw new BadRequestException('specificDate ou dayOfWeek é obrigatório');
+    }
+    if (!dto.startTime || !dto.endTime) {
+      throw new BadRequestException('startTime e endTime são obrigatórios');
     }
     return this.availabilityService.createRule(dto);
   }
