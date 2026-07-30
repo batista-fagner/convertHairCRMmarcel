@@ -589,10 +589,24 @@ export class SdrController {
    * mandando duas mensagens seguidas em vez de um bloco só de texto.
    */
   private splitBubbles(reply: string): string[] {
-    return reply
-      .split('|||')
-      .map((b) => b.trim())
-      .filter(Boolean);
+    const raw = reply.split('|||').map((b) => b.trim()).filter(Boolean);
+
+    // Proteção determinística: mesmo com o prompt instruindo o contrário, a IA
+    // às vezes quebra uma lista de bullets (dias/horários disponíveis) em
+    // várias bolhas via "|||" — uma mensagem de WhatsApp por item, poluído.
+    // Aqui junta de volta bolhas consecutivas que começam com "•" numa só,
+    // separadas por quebra de linha real — nunca depende só do prompt pra isso.
+    const merged: string[] = [];
+    for (const bubble of raw) {
+      const isBullet = bubble.startsWith('•');
+      const prev = merged[merged.length - 1];
+      if (isBullet && prev !== undefined && prev.startsWith('•')) {
+        merged[merged.length - 1] = `${prev}\n${bubble}`;
+      } else {
+        merged.push(bubble);
+      }
+    }
+    return merged;
   }
 
   /**
