@@ -1335,6 +1335,15 @@ const AVAILABILITY_MONTHS = [
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
+// "14:00" → "2:00 PM" — agenda do Marcel é em padrão EUA (AM/PM).
+function formatAmPm(hhmm) {
+  if (!hhmm) return hhmm
+  const [h, m] = hhmm.split(':').map(Number)
+  const period = h < 12 ? 'AM' : 'PM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`
+}
+
 function AvailabilityDayModal({ dateStr, dayLabel, rulesForDay, onClose, onChanged }) {
   const [startTime, setStartTime] = useState('08:00')
   const [endTime, setEndTime] = useState('18:00')
@@ -1370,7 +1379,7 @@ function AvailabilityDayModal({ dateStr, dayLabel, rulesForDay, onClose, onChang
   }
 
   const removeRange = async (rule) => {
-    if (!confirm(`Remover o horário ${rule.startTime}-${rule.endTime}?`)) return
+    if (!confirm(`Remover o horário ${formatAmPm(rule.startTime)}-${formatAmPm(rule.endTime)}?`)) return
     await fetch(`${API}/availability/rules/${rule.id}`, { method: 'DELETE' })
     onChanged()
   }
@@ -1395,7 +1404,7 @@ function AvailabilityDayModal({ dateStr, dayLabel, rulesForDay, onClose, onChang
               {rulesForDay.map(r => (
                 <div key={r.id} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2">
                   <div className="text-sm">
-                    <span className={r.active ? 'text-gray-800 font-medium' : 'text-gray-400 line-through'}>{r.startTime} – {r.endTime}</span>
+                    <span className={r.active ? 'text-gray-800 font-medium' : 'text-gray-400 line-through'}>{formatAmPm(r.startTime)} – {formatAmPm(r.endTime)}</span>
                     <span className="text-gray-400 text-xs ml-2">({r.slotMinutes}min/slot)</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1416,12 +1425,14 @@ function AvailabilityDayModal({ dateStr, dayLabel, rulesForDay, onClose, onChang
             <div className="grid grid-cols-3 gap-2">
               <input
                 type="time"
+                lang="en-US"
                 value={startTime}
                 onChange={e => setStartTime(e.target.value)}
                 className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
               />
               <input
                 type="time"
+                lang="en-US"
                 value={endTime}
                 onChange={e => setEndTime(e.target.value)}
                 className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
