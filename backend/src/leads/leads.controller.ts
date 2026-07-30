@@ -38,6 +38,37 @@ export class LeadsController {
     return lead;
   }
 
+  // Webhook do GoHighLevel (página de captura do Marcel) — payload livre,
+  // aceita name/phone/email em variações de nome de campo que o GHL manda.
+  @Post('ghl-capture')
+  async ghlCapture(@Body() body: Record<string, any>) {
+    const name = String(body.name || body.full_name || body.fullName || '').trim();
+    const phone = String(body.phone || body.phone_number || body.phoneNumber || '').replace(/\D/g, '');
+    const email = String(body.email || '').trim().toLowerCase() || undefined;
+
+    if (!name || !phone) {
+      throw new HttpException('Nome e telefone são obrigatórios', HttpStatus.BAD_REQUEST);
+    }
+
+    const existing = await this.leadsService.findByPhone(phone);
+    if (existing) {
+      return existing;
+    }
+
+    const lead = await this.leadsService.create({
+      name,
+      phone,
+      email,
+      agentMode: 'sdr',
+      kanbanStage: 'novo',
+      kanbanStageManual: true,
+      utmSource: 'ghl',
+      utmMedium: 'capture-page',
+    });
+    this.realtime.emitLeadCreated(lead);
+    return lead;
+  }
+
   @Get()
   async findAll(
     @Query('campaignId') campaignId?: string,
