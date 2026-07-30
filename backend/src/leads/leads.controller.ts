@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Delete, Patch, Post, Body, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Param, Query, Delete, Patch, Post, Body, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { FacebookService } from '../facebook/facebook.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -6,6 +6,8 @@ import { KanbanStage } from '../common/entities/lead.entity';
 
 @Controller('leads')
 export class LeadsController {
+  private readonly logger = new Logger(LeadsController.name);
+
   constructor(
     private leadsService: LeadsService,
     private facebookService: FacebookService,
@@ -42,11 +44,19 @@ export class LeadsController {
   // aceita name/phone/email em variações de nome de campo que o GHL manda.
   @Post('ghl-capture')
   async ghlCapture(@Body() body: Record<string, any>) {
-    const name = String(body.name || body.full_name || body.fullName || '').trim();
-    const phone = String(body.phone || body.phone_number || body.phoneNumber || '').replace(/\D/g, '');
-    const email = String(body.email || '').trim().toLowerCase() || undefined;
+    this.logger.log(`ghl-capture payload recebido: ${JSON.stringify(body)}`);
+
+    // GHL manda formatos diferentes conforme o tipo de ação/evento do workflow
+    // (contato direto, ou aninhado em "contact"/"data") — tenta todas as variações.
+    const c = body.contact || body.data || body;
+    const first = c.first_name || c.firstName || '';
+    const last = c.last_name || c.lastName || '';
+    const name = String(c.name || c.full_name || c.fullName || [first, last].filter(Boolean).join(' ') || '').trim();
+    const phone = String(c.phone || c.phone_number || c.phoneNumber || '').replace(/\D/g, '');
+    const email = String(c.email || '').trim().toLowerCase() || undefined;
 
     if (!name || !phone) {
+      this.logger.warn(`ghl-capture: campos faltando (name="${name}", phone="${phone}")`);
       throw new HttpException('Nome e telefone são obrigatórios', HttpStatus.BAD_REQUEST);
     }
 
