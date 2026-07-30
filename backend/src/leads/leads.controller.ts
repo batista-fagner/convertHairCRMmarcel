@@ -72,8 +72,7 @@ export class LeadsController {
       agentMode: 'sdr',
       kanbanStage: 'novo',
       kanbanStageManual: true,
-      utmSource: 'ghl',
-      utmMedium: 'capture-page',
+      ghlContext: body as any,
     });
     this.realtime.emitLeadCreated(lead);
     return lead;

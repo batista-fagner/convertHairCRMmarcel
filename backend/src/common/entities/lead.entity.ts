@@ -25,6 +25,22 @@ export interface EnrichmentData {
   posts?: Post[];
 }
 
+// Payload bruto recebido do webhook de captura do GoHighLevel (página do
+// cliente) — guardado como veio pra alimentar o drawer de rastreamento sem
+// precisar mapear campo a campo (formato definido pelo cliente, não por nós).
+export interface GhlContext {
+  event?: string;
+  event_id?: string;
+  created_at?: string;
+  source?: string;
+  lead_id?: string | number;
+  contact?: { name?: string; email?: string; phone?: string };
+  qualification?: Record<string, any>;
+  funnel?: Record<string, any>;
+  attribution?: Record<string, any>;
+  location?: Record<string, any>;
+}
+
 @Entity('leads')
 export class Lead {
   @PrimaryGeneratedColumn('uuid')
@@ -160,6 +176,9 @@ export class Lead {
 
   @Column({ name: 'enrichment_data', type: 'jsonb', nullable: true })
   enrichmentData?: EnrichmentData;
+
+  @Column({ name: 'ghl_context', type: 'jsonb', nullable: true })
+  ghlContext?: GhlContext;
 
   @Column({ name: 'ai_insight', type: 'jsonb', nullable: true })
   aiInsight?: any;
