@@ -59,9 +59,9 @@ const NAV_GROUPS = [
   {
     label: 'Integrações',
     items: [
-      { icon: MessageCircle, label: 'Instagram Leads', path: '/instagram' },
-      { icon: Zap, label: 'IG Automação', path: '/instagram-auto' },
-      { icon: Camera, label: 'DM Inbox', path: '/ig-inbox', badgeKey: 'igUnread' },
+      { icon: MessageCircle, label: 'Instagram Leads', path: '/instagram', disabled: true },
+      { icon: Zap, label: 'IG Automação', path: '/instagram-auto', disabled: true },
+      { icon: Camera, label: 'DM Inbox', path: '/ig-inbox', badgeKey: 'igUnread', disabled: true },
     ],
   },
   {
@@ -69,7 +69,7 @@ const NAV_GROUPS = [
     items: [
       { icon: Sparkles, label: 'Carrossel IG', path: '/content', disabled: true },
       { icon: Video, label: 'Vídeos', path: '/videos' },
-      { icon: Image, label: 'Posts IG', path: '/instagram-posts' },
+      { icon: Image, label: 'Posts IG', path: '/instagram-posts', disabled: true },
     ],
   },
   {
