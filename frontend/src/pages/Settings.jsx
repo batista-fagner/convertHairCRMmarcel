@@ -364,6 +364,9 @@ function SdrPromptEditor() {
   )
 }
 
+// Feature desativada pra esse cliente — card fica visível mas cinza/travado.
+const IG_CATCHALL_DISABLED = true
+
 function IgCatchallEditor() {
   const [enabled, setEnabled] = useState(false)
   const [prompt, setPrompt] = useState('')
@@ -415,12 +418,14 @@ function IgCatchallEditor() {
   const restoreDefault = () => setPrompt(defaultPrompt)
 
   return (
-    <div className="mb-6 bg-white rounded-xl border border-slate-200 p-5">
+    <div className={`mb-6 bg-white rounded-xl border border-slate-200 p-5 ${IG_CATCHALL_DISABLED ? 'opacity-50 grayscale pointer-events-none select-none' : ''}`}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-violet-600" />
           <p className="font-semibold text-slate-800 text-sm">IA de DM direta no Instagram (sem automação específica)</p>
-          {isCustom ? (
+          {IG_CATCHALL_DISABLED ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-500 font-medium">Em breve</span>
+          ) : isCustom ? (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Personalizado</span>
           ) : (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">Padrão</span>
@@ -428,6 +433,7 @@ function IgCatchallEditor() {
         </div>
         <button
           onClick={() => setEnabled((v) => !v)}
+          disabled={IG_CATCHALL_DISABLED}
           className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition ${enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
         >
           {enabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
