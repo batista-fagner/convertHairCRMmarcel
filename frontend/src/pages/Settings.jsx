@@ -4,6 +4,7 @@ import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Sav
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
 const integrations = [
+  { icon: Key, label: 'Meta Ads API', description: 'Conecte sua conta do Meta para puxar métricas de campanhas', color: 'bg-blue-50 text-blue-600', status: 'Não conectado' },
   { icon: MessageCircle, label: 'uazapi (WhatsApp)', description: 'Envio automático de WhatsApp para follow-up de leads', color: 'bg-emerald-50 text-emerald-600', status: 'Não conectado' },
   { icon: Webhook, label: 'Resend (Email)', description: 'API de email para disparo de sequências automáticas', color: 'bg-violet-50 text-violet-600', status: 'Não conectado' },
   { icon: Share2, label: 'RapidAPI (Instagram)', description: 'Enriquecimento de leads via análise de perfil Instagram', color: 'bg-orange-50 text-orange-600', status: 'Não conectado' },
@@ -1239,7 +1240,26 @@ function FollowupStatus() {
   )
 }
 
-function MetaAdsConfig() {
+function useMetaAdsStatus(refreshKey) {
+  const [status, setStatus] = useState({ loading: true, configured: false })
+
+  useEffect(() => {
+    let cancelled = false
+    setStatus(s => ({ ...s, loading: true }))
+    fetch(`${API}/settings/meta-ads`)
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return
+        setStatus({ loading: false, configured: !!d.pixelId && !!d.accessTokenSet })
+      })
+      .catch(() => !cancelled && setStatus({ loading: false, configured: false }))
+    return () => { cancelled = true }
+  }, [refreshKey])
+
+  return status
+}
+
+function MetaAdsDrawer({ open, onClose, onSaved }) {
   const [pixelId, setPixelId] = useState('')
   const [pageId, setPageId] = useState('')
   const [adAccountId, setAdAccountId] = useState('')
@@ -1265,9 +1285,7 @@ function MetaAdsConfig() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
-
-  const configured = !!pixelId && accessTokenSet
+  useEffect(() => { if (open) load() }, [open])
 
   const save = async () => {
     setSaving(true)
@@ -1281,6 +1299,7 @@ function MetaAdsConfig() {
       setAccessToken('')
       setAdsToken('')
       load()
+      onSaved?.()
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } finally {
@@ -1289,98 +1308,112 @@ function MetaAdsConfig() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Key className="w-5 h-5 text-blue-500" />
-          <div>
-            <p className="font-semibold text-slate-800 text-sm">Meta Ads API</p>
-            <p className="text-xs text-slate-400 mt-0.5">Credenciais usadas pra Conversions API, insights de gasto e criativo dos anúncios</p>
-          </div>
-        </div>
-        <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${configured ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-          {configured ? 'Conectado' : 'Não conectado'}
-        </span>
-      </div>
+    <>
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${open ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
 
-      {loading ? (
-        <div className="flex items-center gap-2 text-slate-400 text-sm py-2">
-          <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
+      {/* Drawer */}
+      <div
+        className={`fixed top-0 right-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white shrink-0">
+          <div className="flex items-center gap-2">
+            <Key className="w-5 h-5" />
+            <p className="font-bold text-sm">Meta Ads API</p>
+          </div>
+          <button onClick={onClose} className="hover:opacity-70 transition">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      ) : (
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">Pixel ID</label>
-            <input
-              type="text"
-              value={pixelId}
-              onChange={e => setPixelId(e.target.value.trim())}
-              placeholder="ex: 964343959626807"
-              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">Page ID</label>
-            <input
-              type="text"
-              value={pageId}
-              onChange={e => setPageId(e.target.value.trim())}
-              placeholder="ID da Página do Facebook conectada ao WhatsApp"
-              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">Ad Account ID</label>
-            <input
-              type="text"
-              value={adAccountId}
-              onChange={e => setAdAccountId(e.target.value.trim())}
-              placeholder="act_XXXXXXXXXX"
-              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">
-              Access Token (Conversions API) {accessTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
-            </label>
-            <input
-              type="password"
-              value={accessToken}
-              onChange={e => setAccessToken(e.target.value.trim())}
-              placeholder={accessTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token aqui'}
-              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">
-              Ads Token (Marketing API) {adsTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
-            </label>
-            <input
-              type="password"
-              value={adsToken}
-              onChange={e => setAdsToken(e.target.value.trim())}
-              placeholder={adsTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token aqui'}
-              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
-          </div>
-          <div className="flex items-center gap-3 pt-1">
-            <button
-              onClick={save}
-              disabled={saving}
-              className="flex items-center gap-2 text-sm font-medium bg-blue-500 hover:bg-blue-600 disabled:bg-slate-200 text-white px-4 py-2 rounded-xl transition"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {saving ? 'Salvando...' : 'Salvar'}
-            </button>
-            {saved && (
-              <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium">
-                <CheckCircle2 className="w-4 h-4" /> Salvo!
-              </span>
-            )}
-          </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+          <p className="text-xs text-slate-400">
+            Credenciais usadas pra Conversions API, insights de gasto e criativo dos anúncios.
+          </p>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-slate-400 text-sm py-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Pixel ID</label>
+                <input
+                  type="text"
+                  value={pixelId}
+                  onChange={e => setPixelId(e.target.value.trim())}
+                  placeholder="ex: 964343959626807"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Page ID</label>
+                <input
+                  type="text"
+                  value={pageId}
+                  onChange={e => setPageId(e.target.value.trim())}
+                  placeholder="ID da Página do Facebook conectada ao WhatsApp"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">Ad Account ID</label>
+                <input
+                  type="text"
+                  value={adAccountId}
+                  onChange={e => setAdAccountId(e.target.value.trim())}
+                  placeholder="act_XXXXXXXXXX"
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">
+                  Access Token (Conversions API) {accessTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
+                </label>
+                <input
+                  type="password"
+                  value={accessToken}
+                  onChange={e => setAccessToken(e.target.value.trim())}
+                  placeholder={accessTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token aqui'}
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">
+                  Ads Token (Marketing API) {adsTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
+                </label>
+                <input
+                  type="password"
+                  value={adsToken}
+                  onChange={e => setAdsToken(e.target.value.trim())}
+                  placeholder={adsTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token aqui'}
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  onClick={save}
+                  disabled={saving}
+                  className="flex items-center gap-2 text-sm font-medium bg-blue-500 hover:bg-blue-600 disabled:bg-slate-200 text-white px-4 py-2 rounded-xl transition"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {saving ? 'Salvando...' : 'Salvar'}
+                </button>
+                {saved && (
+                  <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium">
+                    <CheckCircle2 className="w-4 h-4" /> Salvo!
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -1738,14 +1771,16 @@ function AvailabilityCalendar() {
 }
 
 export default function Settings() {
+  const [metaDrawerOpen, setMetaDrawerOpen] = useState(false)
+  const [metaRefreshKey, setMetaRefreshKey] = useState(0)
+  const metaStatus = useMetaAdsStatus(metaRefreshKey)
+
   return (
     <div className="p-6 overflow-y-auto">
       <div className="mb-6">
         <h2 className="text-lg font-semibold text-slate-800">Configurações</h2>
         <p className="text-sm text-slate-400 mt-0.5">Integrações e configurações da plataforma</p>
       </div>
-
-      <MetaAdsConfig />
 
       <SdrPromptEditor />
 
@@ -1762,25 +1797,41 @@ export default function Settings() {
       <div>
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Integrações</p>
         <div className="space-y-3">
-          {integrations.map(({ icon: Icon, label, description, color, status }) => (
-            <div key={label} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-4">
-              <div className={`w-10 h-10 rounded-lg ${color} flex items-center justify-center shrink-0`}>
-                <Icon className="w-5 h-5" />
+          {integrations.map(({ icon: Icon, label, description, color, status }) => {
+            const isMeta = label === 'Meta Ads API'
+            const statusLabel = isMeta
+              ? (metaStatus.loading ? '...' : metaStatus.configured ? 'Conectado' : status)
+              : status
+            return (
+              <div key={label} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-lg ${color} flex items-center justify-center shrink-0`}>
+                  <Icon className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-800 text-sm">{label}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">{description}</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`text-xs ${isMeta && metaStatus.configured ? 'text-emerald-600 font-medium' : 'text-slate-400'}`}>{statusLabel}</span>
+                  <button
+                    onClick={isMeta ? () => setMetaDrawerOpen(true) : undefined}
+                    disabled={!isMeta}
+                    className="text-xs font-medium text-violet-600 hover:text-violet-700 border border-violet-200 hover:border-violet-400 px-3 py-1.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Conectar
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-800 text-sm">{label}</p>
-                <p className="text-xs text-slate-400 mt-0.5 truncate">{description}</p>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <span className="text-xs text-slate-400">{status}</span>
-                <button className="text-xs font-medium text-violet-600 hover:text-violet-700 border border-violet-200 hover:border-violet-400 px-3 py-1.5 rounded-lg transition">
-                  Conectar
-                </button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
+
+      <MetaAdsDrawer
+        open={metaDrawerOpen}
+        onClose={() => setMetaDrawerOpen(false)}
+        onSaved={() => setMetaRefreshKey(k => k + 1)}
+      />
     </div>
   )
 }
