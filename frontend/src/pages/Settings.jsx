@@ -4,7 +4,6 @@ import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Sav
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
 const integrations = [
-  { icon: Key, label: 'Meta Ads API', description: 'Conecte sua conta do Meta para puxar métricas de campanhas', color: 'bg-blue-50 text-blue-600', status: 'Não conectado' },
   { icon: MessageCircle, label: 'uazapi (WhatsApp)', description: 'Envio automático de WhatsApp para follow-up de leads', color: 'bg-emerald-50 text-emerald-600', status: 'Não conectado' },
   { icon: Webhook, label: 'Resend (Email)', description: 'API de email para disparo de sequências automáticas', color: 'bg-violet-50 text-violet-600', status: 'Não conectado' },
   { icon: Share2, label: 'RapidAPI (Instagram)', description: 'Enriquecimento de leads via análise de perfil Instagram', color: 'bg-orange-50 text-orange-600', status: 'Não conectado' },
@@ -1240,6 +1239,151 @@ function FollowupStatus() {
   )
 }
 
+function MetaAdsConfig() {
+  const [pixelId, setPixelId] = useState('')
+  const [pageId, setPageId] = useState('')
+  const [adAccountId, setAdAccountId] = useState('')
+  const [accessToken, setAccessToken] = useState('')
+  const [adsToken, setAdsToken] = useState('')
+  const [accessTokenSet, setAccessTokenSet] = useState(false)
+  const [adsTokenSet, setAdsTokenSet] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const load = () => {
+    setLoading(true)
+    fetch(`${API}/settings/meta-ads`)
+      .then(r => r.json())
+      .then(d => {
+        setPixelId(d.pixelId || '')
+        setPageId(d.pageId || '')
+        setAdAccountId(d.adAccountId || '')
+        setAccessTokenSet(!!d.accessTokenSet)
+        setAdsTokenSet(!!d.adsTokenSet)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [])
+
+  const configured = !!pixelId && accessTokenSet
+
+  const save = async () => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      await fetch(`${API}/settings/meta-ads`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pixelId, pageId, adAccountId, accessToken, adsToken }),
+      })
+      setAccessToken('')
+      setAdsToken('')
+      load()
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Key className="w-5 h-5 text-blue-500" />
+          <div>
+            <p className="font-semibold text-slate-800 text-sm">Meta Ads API</p>
+            <p className="text-xs text-slate-400 mt-0.5">Credenciais usadas pra Conversions API, insights de gasto e criativo dos anúncios</p>
+          </div>
+        </div>
+        <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${configured ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+          {configured ? 'Conectado' : 'Não conectado'}
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-slate-400 text-sm py-2">
+          <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">Pixel ID</label>
+            <input
+              type="text"
+              value={pixelId}
+              onChange={e => setPixelId(e.target.value.trim())}
+              placeholder="ex: 964343959626807"
+              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">Page ID</label>
+            <input
+              type="text"
+              value={pageId}
+              onChange={e => setPageId(e.target.value.trim())}
+              placeholder="ID da Página do Facebook conectada ao WhatsApp"
+              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">Ad Account ID</label>
+            <input
+              type="text"
+              value={adAccountId}
+              onChange={e => setAdAccountId(e.target.value.trim())}
+              placeholder="act_XXXXXXXXXX"
+              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">
+              Access Token (Conversions API) {accessTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
+            </label>
+            <input
+              type="password"
+              value={accessToken}
+              onChange={e => setAccessToken(e.target.value.trim())}
+              placeholder={accessTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token aqui'}
+              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">
+              Ads Token (Marketing API) {adsTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
+            </label>
+            <input
+              type="password"
+              value={adsToken}
+              onChange={e => setAdsToken(e.target.value.trim())}
+              placeholder={adsTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token aqui'}
+              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="flex items-center gap-2 text-sm font-medium bg-blue-500 hover:bg-blue-600 disabled:bg-slate-200 text-white px-4 py-2 rounded-xl transition"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {saving ? 'Salvando...' : 'Salvar'}
+            </button>
+            {saved && (
+              <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium">
+                <CheckCircle2 className="w-4 h-4" /> Salvo!
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function NotifyPhonesConfig() {
   const [phone1, setPhone1] = useState('')
   const [phone2, setPhone2] = useState('')
@@ -1600,6 +1744,8 @@ export default function Settings() {
         <h2 className="text-lg font-semibold text-slate-800">Configurações</h2>
         <p className="text-sm text-slate-400 mt-0.5">Integrações e configurações da plataforma</p>
       </div>
+
+      <MetaAdsConfig />
 
       <SdrPromptEditor />
 

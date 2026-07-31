@@ -3,12 +3,23 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { createHash } from 'crypto';
 import { Lead } from '../common/entities/lead.entity';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class FacebookService {
   private readonly logger = new Logger(FacebookService.name);
 
-  constructor(private config: ConfigService) {}
+  constructor(
+    private config: ConfigService,
+    private settings: SettingsService,
+  ) {}
+
+  // Variável de ambiente sempre tem prioridade (deploy antigo continua
+  // funcionando sem precisar configurar nada na tela); se não tiver env var,
+  // cai pro valor salvo em Configurações > Meta Ads API.
+  private async cfg(key: string): Promise<string | null> {
+    return this.config.get(key) || (await this.settings.get(key)) || null;
+  }
 
   private sha256(value: string): string {
     return createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
@@ -19,7 +30,7 @@ export class FacebookService {
     return `fb.1.${timestamp}.${fbclid}`;
   }
 
-  private buildUserData(lead: Lead): Record<string, string> {
+  private async buildUserData(lead: Lead): Promise<Record<string, string>> {
     const userData: Record<string, string> = {};
     if (lead.email) userData['em'] = this.sha256(lead.email);
     if (lead.phone) userData['ph'] = this.sha256(`55${lead.phone.replace(/\D/g, '')}`);
@@ -31,7 +42,7 @@ export class FacebookService {
     // em 2026-07-11 — sem isso o evento de mensagens é rejeitado).
     if (lead.ctwaClid) {
       userData['ctwa_clid'] = lead.ctwaClid;
-      const pageId = this.config.get('FB_PAGE_ID');
+      const pageId = await this.cfg('FB_PAGE_ID');
       if (pageId) userData['page_id'] = pageId;
     }
     if (lead.id) userData['external_id'] = lead.id;
@@ -45,8 +56,8 @@ export class FacebookService {
     eventSourceUrl?: string,
     opts?: { ctwa?: boolean },
   ): Promise<void> {
-    const pixelId = this.config.get('FB_PIXEL_ID');
-    const accessToken = this.config.get('FB_ACCESS_TOKEN');
+    const pixelId = await this.cfg('FB_PIXEL_ID');
+    const accessToken = await this.cfg('FB_ACCESS_TOKEN');
 
     if (!pixelId || !accessToken) {
       this.logger.warn('FB_PIXEL_ID ou FB_ACCESS_TOKEN não configurados — evento não enviado');
@@ -91,8 +102,8 @@ export class FacebookService {
   }
 
   async getAdCreative(adId: string): Promise<any> {
-    const accessToken = this.config.get('FB_ADS_TOKEN');
-    const adAccountId = this.config.get('FB_AD_ACCOUNT_ID');
+    const accessToken = await this.cfg('FB_ADS_TOKEN');
+    const adAccountId = await this.cfg('FB_AD_ACCOUNT_ID');
     if (!accessToken) throw new Error('FB_ADS_TOKEN não configurado');
 
     // Busca o anúncio com creative e asset_feed_spec para pegar hashes de imagem.
@@ -156,7 +167,7 @@ export class FacebookService {
 
   /** Gasto (spend) de um anúncio na Marketing API, usado pra calcular custo por lead qualificado. */
   async getAdSpend(adId: string, range?: { since: string; until: string }): Promise<number> {
-    const accessToken = this.config.get('FB_ADS_TOKEN');
+    const accessToken = await this.cfg('FB_ADS_TOKEN');
     if (!accessToken) return 0;
     try {
       const params: Record<string, string> = { fields: 'spend', access_token: accessToken };
@@ -176,7 +187,7 @@ export class FacebookService {
 
   /** Resolve o access token da Página (FB_PAGE_ID) a partir de um token de usuário/sistema. */
   private async getPageAccessToken(userToken: string): Promise<string | null> {
-    const pageId = this.config.get('FB_PAGE_ID');
+    const pageId = await this.cfg('FB_PAGE_ID');
     if (!pageId) return null;
     const response = await axios.get('https://graph.facebook.com/v21.0/me/accounts', {
       params: { access_token: userToken },
@@ -191,7 +202,7 @@ export class FacebookService {
    * de WhatsApp — não mexe no fluxo de LP/site, que já resolve isso via UTM da URL.
    */
   async getAdDetails(adId: string): Promise<{ adName: string; adsetName: string; adsetId: string; campaignName: string } | null> {
-    const accessToken = this.config.get('FB_ADS_TOKEN');
+    const accessToken = await this.cfg('FB_ADS_TOKEN');
     if (!accessToken) return null;
 
     try {
@@ -215,7 +226,7 @@ export class FacebookService {
   }
 
   async sendLeadEvent(lead: Lead, extra?: { fbp?: string; fbc?: string; userAgent?: string; clientIp?: string }): Promise<void> {
-    const userData = this.buildUserData(lead);
+    const userData = await this.buildUserData(lead);
     if (extra?.fbp) userData['fbp'] = extra.fbp;
     // Prefere o _fbc cookie do browser (timestamp correto do clique) sobre o construído no backend
     if (extra?.fbc) userData['fbc'] = extra.fbc;
@@ -229,12 +240,12 @@ export class FacebookService {
   }
 
   async sendPurchaseEvent(lead: Lead, value: number): Promise<void> {
-    const userData = this.buildUserData(lead);
+    const userData = await this.buildUserData(lead);
     await this.sendEvent('Purchase', userData, { value, currency: 'BRL' }, lead.ctwaSourceUrl, { ctwa: Boolean(lead.ctwaClid) });
   }
 
   async sendMqlEvent(lead: Lead, extra?: { fbp?: string; fbc?: string; userAgent?: string; clientIp?: string }): Promise<void> {
-    const userData = this.buildUserData(lead);
+    const userData = await this.buildUserData(lead);
     if (extra?.fbp) userData['fbp'] = extra.fbp;
     if (extra?.fbc) userData['fbc'] = extra.fbc;
     if (extra?.clientIp) userData['client_ip_address'] = extra.clientIp;

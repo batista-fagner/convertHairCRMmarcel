@@ -56,4 +56,36 @@ export class SettingsController {
     return { phone1: phones[0] ?? '', phone2: phones[1] ?? '' };
   }
 
+  // Guarda as credenciais do Meta Ads API no banco (chave-valor), pra não
+  // depender de variável de ambiente no Railway. Token nunca volta inteiro
+  // pro frontend — só um indicador de "configurado" pra não vazar segredo.
+  @Get('meta-ads')
+  async getMetaAdsConfig() {
+    const [pixelId, pageId, adAccountId, accessToken, adsToken] = await Promise.all([
+      this.settingsService.get('FB_PIXEL_ID'),
+      this.settingsService.get('FB_PAGE_ID'),
+      this.settingsService.get('FB_AD_ACCOUNT_ID'),
+      this.settingsService.get('FB_ACCESS_TOKEN'),
+      this.settingsService.get('FB_ADS_TOKEN'),
+    ]);
+    return {
+      pixelId: pixelId ?? '',
+      pageId: pageId ?? '',
+      adAccountId: adAccountId ?? '',
+      accessTokenSet: !!accessToken,
+      adsTokenSet: !!adsToken,
+    };
+  }
+
+  @Put('meta-ads')
+  async setMetaAdsConfig(@Body() body: { pixelId?: string; pageId?: string; adAccountId?: string; accessToken?: string; adsToken?: string }) {
+    if (typeof body.pixelId === 'string') await this.settingsService.set('FB_PIXEL_ID', body.pixelId.trim());
+    if (typeof body.pageId === 'string') await this.settingsService.set('FB_PAGE_ID', body.pageId.trim());
+    if (typeof body.adAccountId === 'string') await this.settingsService.set('FB_AD_ACCOUNT_ID', body.adAccountId.trim());
+    // Tokens só são sobrescritos se o usuário digitar um novo valor — campo
+    // vazio no formulário significa "manter o que já está salvo".
+    if (body.accessToken) await this.settingsService.set('FB_ACCESS_TOKEN', body.accessToken.trim());
+    if (body.adsToken) await this.settingsService.set('FB_ADS_TOKEN', body.adsToken.trim());
+    return this.getMetaAdsConfig();
+  }
 }
