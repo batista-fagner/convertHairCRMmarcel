@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Calendar, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
@@ -1259,6 +1259,18 @@ function useMetaAdsStatus(refreshKey) {
   return status
 }
 
+function FieldInfo({ text }) {
+  return (
+    <span className="relative inline-flex group align-middle ml-1">
+      <Info className="w-3.5 h-3.5 text-slate-400 cursor-help" />
+      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-60 rounded-lg bg-slate-800 text-white text-[11px] leading-snug px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
+        {text}
+        <span className="absolute left-1/2 -translate-x-1/2 top-full w-2 h-2 bg-slate-800 rotate-45" />
+      </span>
+    </span>
+  )
+}
+
 function MetaAdsDrawer({ open, onClose, onSaved }) {
   const [pixelId, setPixelId] = useState('')
   const [pageId, setPageId] = useState('')
@@ -1341,7 +1353,10 @@ function MetaAdsDrawer({ open, onClose, onSaved }) {
           ) : (
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">Pixel ID</label>
+                <label className="text-xs font-medium text-slate-500 mb-1 flex items-center">
+                  Pixel ID
+                  <FieldInfo text="ID do Pixel do Meta. Encontre em: Gerenciador de Eventos → Fontes de dados → seu pixel." />
+                </label>
                 <input
                   type="text"
                   value={pixelId}
@@ -1351,7 +1366,10 @@ function MetaAdsDrawer({ open, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">Page ID</label>
+                <label className="text-xs font-medium text-slate-500 mb-1 flex items-center">
+                  Page ID
+                  <FieldInfo text="ID da Página do Facebook conectada ao número de WhatsApp que recebe os leads dos anúncios. Necessário pra atribuição correta de cliques (CTWA)." />
+                </label>
                 <input
                   type="text"
                   value={pageId}
@@ -1361,7 +1379,10 @@ function MetaAdsDrawer({ open, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">Ad Account ID</label>
+                <label className="text-xs font-medium text-slate-500 mb-1 flex items-center">
+                  Ad Account ID
+                  <FieldInfo text="ID da conta de anúncios, no formato act_XXXXXXXXXX. Aparece na URL do Gerenciador de Anúncios." />
+                </label>
                 <input
                   type="text"
                   value={adAccountId}
@@ -1371,8 +1392,10 @@ function MetaAdsDrawer({ open, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">
-                  Access Token (Conversions API) {accessTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
+                <label className="text-xs font-medium text-slate-500 mb-1 flex items-center">
+                  Access Token (Conversions API)
+                  <FieldInfo text="Token gerado em: Gerenciador de Eventos → seu Pixel → Configurações → Conversions API → Gerar token de acesso. Usado pra enviar eventos de Lead/Purchase ao Meta." />
+                  {accessTokenSet && <span className="text-emerald-600 font-normal ml-1.5">— já configurado</span>}
                 </label>
                 <input
                   type="password"
@@ -1383,8 +1406,10 @@ function MetaAdsDrawer({ open, onClose, onSaved }) {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">
-                  Ads Token (Marketing API) {adsTokenSet && <span className="text-emerald-600 font-normal">— já configurado</span>}
+                <label className="text-xs font-medium text-slate-500 mb-1 flex items-center">
+                  Ads Token (Marketing API)
+                  <FieldInfo text="Token com permissões ads_read, ads_management e business_management — gerado via um System User nas Configurações do Business Manager, ou pelo Graph API Explorer. Usado pra puxar gasto e criativo dos anúncios." />
+                  {adsTokenSet && <span className="text-emerald-600 font-normal ml-1.5">— já configurado</span>}
                 </label>
                 <input
                   type="password"
