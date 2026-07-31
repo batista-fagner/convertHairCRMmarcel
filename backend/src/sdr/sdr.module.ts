@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SdrController } from './sdr.controller';
 import { FollowupController } from './followup.controller';
 import { ManualMessageController } from './manual-message.controller';
+import { WhatsappInstanceController } from './whatsapp-instance.controller';
 import { SdrService } from './sdr.service';
 import { SdrFollowupService } from './sdr-followup.service';
 import { FollowupVideoService } from './followup-video.service';
@@ -29,7 +30,7 @@ import { AppointmentsModule } from '../appointments/appointments.module';
     AvailabilityModule,
     AppointmentsModule,
   ],
-  controllers: [SdrController, FollowupController, ManualMessageController],
+  controllers: [SdrController, FollowupController, ManualMessageController, WhatsappInstanceController],
   providers: [SdrService, SdrFollowupService, FollowupVideoService],
 })
 export class SdrModule {}

@@ -1259,6 +1259,203 @@ function useMetaAdsStatus(refreshKey) {
   return status
 }
 
+function useWhatsappInstanceStatus(refreshKey) {
+  const [status, setStatus] = useState({ loading: true, connected: false, configured: false })
+
+  useEffect(() => {
+    let cancelled = false
+    setStatus(s => ({ ...s, loading: true }))
+    fetch(`${API}/whatsapp-instance/status`)
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return
+        setStatus({ loading: false, connected: !!d.connected, configured: !!d.configured, profileName: d.profileName, owner: d.owner })
+      })
+      .catch(() => !cancelled && setStatus({ loading: false, connected: false, configured: false }))
+    return () => { cancelled = true }
+  }, [refreshKey])
+
+  return status
+}
+
+function WhatsappInstanceDrawer({ open, onClose, onChanged }) {
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [qrcode, setQrcode] = useState(null)
+  const [error, setError] = useState('')
+  const pollRef = useRef(null)
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch(`${API}/whatsapp-instance/status`)
+      const d = await res.json()
+      setStatus(d)
+      return d
+    } catch {
+      return null
+    }
+  }
+
+  const startPolling = () => {
+    stopPolling()
+    pollRef.current = setInterval(async () => {
+      const d = await fetchStatus()
+      if (!d) return
+      if (d.connected) {
+        stopPolling()
+        setQrcode(null)
+        setConnecting(false)
+        onChanged?.()
+      } else if (d.qrcode) {
+        setQrcode(d.qrcode)
+      }
+    }, 3000)
+  }
+
+  useEffect(() => {
+    if (!open) { stopPolling(); return }
+    setError('')
+    setQrcode(null)
+    setLoading(true)
+    fetchStatus().finally(() => setLoading(false))
+    return () => stopPolling()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  const handleConnect = async () => {
+    setError('')
+    setConnecting(true)
+    try {
+      const res = await fetch(`${API}/whatsapp-instance/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const d = await res.json()
+      if (d.error) { setError(d.error); setConnecting(false); return }
+      setQrcode(d.qrcode || null)
+      startPolling()
+    } catch {
+      setError('Erro ao iniciar conexão com a uazapi')
+      setConnecting(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    if (!confirm('Desconectar o WhatsApp do SDR? A IA para de responder leads até reconectar.')) return
+    setError('')
+    try {
+      await fetch(`${API}/whatsapp-instance/disconnect`, { method: 'POST' })
+      stopPolling()
+      setQrcode(null)
+      await fetchStatus()
+      onChanged?.()
+    } catch {
+      setError('Erro ao desconectar')
+    }
+  }
+
+  const connected = status?.connected
+
+  return (
+    <>
+      <div
+        className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${open ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
+      <div
+        className={`fixed top-0 right-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white shrink-0">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-5 h-5" />
+            <p className="font-bold text-sm">WhatsApp do SDR</p>
+          </div>
+          <button onClick={onClose} className="hover:opacity-70 transition">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+          <p className="text-xs text-slate-400">
+            Conecte o número de WhatsApp que a Clara (SDR) usa pra conversar com os leads, escaneando o QR code direto por aqui.
+          </p>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-slate-400 text-sm py-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
+            </div>
+          ) : !status?.configured ? (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">
+              SDR_UAZAPI_TOKEN não está configurado no ambiente. Configure a variável no backend antes de conectar.
+            </div>
+          ) : connected ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+                {status.profilePicUrl ? (
+                  <img src={status.profilePicUrl} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-emerald-200 flex items-center justify-center shrink-0">
+                    <MessageCircle className="w-6 h-6 text-emerald-700" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-emerald-800 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" /> Conectado
+                  </p>
+                  <p className="text-xs text-emerald-700 truncate">{status.profileName || 'Sem nome de perfil'}</p>
+                  {status.owner && <p className="text-[11px] text-emerald-600">{status.owner}</p>}
+                </div>
+              </div>
+              <button
+                onClick={handleDisconnect}
+                className="w-full flex items-center justify-center gap-2 text-sm font-medium text-red-600 border border-red-200 hover:bg-red-50 px-4 py-2.5 rounded-xl transition"
+              >
+                <XCircle className="w-4 h-4" /> Desconectar
+              </button>
+            </div>
+          ) : qrcode ? (
+            <div className="space-y-3 text-center">
+              <div className="flex justify-center">
+                <img src={qrcode} alt="QR Code do WhatsApp" className="w-56 h-56 rounded-xl border border-slate-200" />
+              </div>
+              <p className="text-xs text-slate-500 flex items-center justify-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Aguardando leitura do QR code...
+              </p>
+              <p className="text-[11px] text-slate-400">
+                No WhatsApp: Aparelhos conectados → Conectar um aparelho → aponte a câmera pra este QR code. Ele se renova sozinho enquanto não for escaneado.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {status?.lastDisconnectReason && (
+                <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg p-2.5">
+                  Última desconexão: {status.lastDisconnectReason}
+                </p>
+              )}
+              <button
+                onClick={handleConnect}
+                disabled={connecting}
+                className="w-full flex items-center justify-center gap-2 text-sm font-medium bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl transition"
+              >
+                {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
+                {connecting ? 'Gerando QR code...' : 'Conectar WhatsApp'}
+              </button>
+            </div>
+          )}
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </div>
+      </div>
+    </>
+  )
+}
+
 function FieldInfo({ text }) {
   return (
     <span className="relative inline-flex group align-middle ml-1">
@@ -1800,6 +1997,10 @@ export default function Settings() {
   const [metaRefreshKey, setMetaRefreshKey] = useState(0)
   const metaStatus = useMetaAdsStatus(metaRefreshKey)
 
+  const [waDrawerOpen, setWaDrawerOpen] = useState(false)
+  const [waRefreshKey, setWaRefreshKey] = useState(0)
+  const waStatus = useWhatsappInstanceStatus(waRefreshKey)
+
   return (
     <div className="p-6 overflow-y-auto">
       <div className="mb-6">
@@ -1824,9 +2025,15 @@ export default function Settings() {
         <div className="space-y-3">
           {integrations.map(({ icon: Icon, label, description, color, status }) => {
             const isMeta = label === 'Meta Ads API'
+            const isWhatsapp = label === 'uazapi (WhatsApp)'
             const statusLabel = isMeta
               ? (metaStatus.loading ? '...' : metaStatus.configured ? 'Conectado' : status)
-              : status
+              : isWhatsapp
+                ? (waStatus.loading ? '...' : waStatus.connected ? 'Conectado' : status)
+                : status
+            const isConnected = (isMeta && metaStatus.configured) || (isWhatsapp && waStatus.connected)
+            const clickable = isMeta || isWhatsapp
+            const handleClick = isMeta ? () => setMetaDrawerOpen(true) : isWhatsapp ? () => setWaDrawerOpen(true) : undefined
             return (
               <div key={label} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-4">
                 <div className={`w-10 h-10 rounded-lg ${color} flex items-center justify-center shrink-0`}>
@@ -1837,10 +2044,10 @@ export default function Settings() {
                   <p className="text-xs text-slate-400 mt-0.5 truncate">{description}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className={`text-xs ${isMeta && metaStatus.configured ? 'text-emerald-600 font-medium' : 'text-slate-400'}`}>{statusLabel}</span>
+                  <span className={`text-xs ${isConnected ? 'text-emerald-600 font-medium' : 'text-slate-400'}`}>{statusLabel}</span>
                   <button
-                    onClick={isMeta ? () => setMetaDrawerOpen(true) : undefined}
-                    disabled={!isMeta}
+                    onClick={handleClick}
+                    disabled={!clickable}
                     className="text-xs font-medium text-violet-600 hover:text-violet-700 border border-violet-200 hover:border-violet-400 px-3 py-1.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Conectar
@@ -1856,6 +2063,12 @@ export default function Settings() {
         open={metaDrawerOpen}
         onClose={() => setMetaDrawerOpen(false)}
         onSaved={() => setMetaRefreshKey(k => k + 1)}
+      />
+
+      <WhatsappInstanceDrawer
+        open={waDrawerOpen}
+        onClose={() => setWaDrawerOpen(false)}
+        onChanged={() => setWaRefreshKey(k => k + 1)}
       />
     </div>
   )
