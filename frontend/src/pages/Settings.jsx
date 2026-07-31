@@ -1263,9 +1263,9 @@ function FieldInfo({ text }) {
   return (
     <span className="relative inline-flex group align-middle ml-1">
       <Info className="w-3.5 h-3.5 text-slate-400 cursor-help" />
-      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-60 rounded-lg bg-slate-800 text-white text-[11px] leading-snug px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
+      <span className="pointer-events-none absolute left-0 bottom-full mb-2 w-64 max-w-[80vw] rounded-lg bg-slate-800 text-white text-[11px] leading-snug px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-lg">
         {text}
-        <span className="absolute left-1/2 -translate-x-1/2 top-full w-2 h-2 bg-slate-800 rotate-45" />
+        <span className="absolute left-2 top-full w-2 h-2 bg-slate-800 rotate-45" />
       </span>
     </span>
   )
