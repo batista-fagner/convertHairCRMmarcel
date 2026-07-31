@@ -44,9 +44,8 @@ export class ManualMessageController {
       throw new HttpException('WhatsApp não configurado (SDR_UAZAPI_TOKEN ausente)', HttpStatus.SERVICE_UNAVAILABLE);
     }
 
-    const phone = lead.phone.startsWith('55') ? lead.phone : `55${lead.phone}`;
-
-    await this.dispatchToUazapi(phone, body);
+    // lead.phone já vem completo (com DDI correto) — não prefixar 55.
+    await this.dispatchToUazapi(lead.phone, body);
 
     const ctx = Array.isArray(lead.aiContext) ? lead.aiContext : [];
     const entry: Record<string, any> = { role: 'assistant', source: 'operator', timestamp: new Date().toISOString() };

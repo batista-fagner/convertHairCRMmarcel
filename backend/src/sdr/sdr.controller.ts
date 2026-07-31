@@ -281,7 +281,11 @@ export class SdrController {
       const fromInstagram = !fromAd && /vim do instagram/i.test(text);
       lead = await this.leadsService.create({
         name: pushName || `Lead ${phone.slice(-4)}`,
-        phone: phone.startsWith('55') ? phone : `55${phone}`,
+        // phone já vem completo (com DDI correto) direto do JID do WhatsApp —
+        // não prefixar 55 aqui, senão números internacionais (ex.: EUA) ficam
+        // inválidos (bug identificado em 2026-07-31: lead dos EUA "14076171172"
+        // virou "5514076171172" e o envio de resposta falhava com 500).
+        phone,
         agentMode: 'sdr',
         kanbanStage: 'novo',
         waStage: 'abertura' as WaStage,
@@ -569,11 +573,12 @@ export class SdrController {
 
   private async sendMessage(phone: string, text: string) {
     try {
-      const normalizedPhone = phone.startsWith('55') ? phone : `55${phone}`;
+      // phone já vem completo (com DDI correto) direto do JID do WhatsApp —
+      // não prefixar 55 aqui (mesmo bug do create acima).
       await firstValueFrom(
         this.http.post(
           `${this.uazapiBaseUrl}/send/text`,
-          { number: normalizedPhone, text },
+          { number: phone, text },
           { headers: { token: this.uazapiToken } },
         ),
       );
@@ -634,11 +639,11 @@ export class SdrController {
 
   private async sendTyping(phone: string, durationMs: number) {
     try {
-      const normalizedPhone = phone.startsWith('55') ? phone : `55${phone}`;
+      // phone já vem completo (com DDI correto) — não prefixar 55.
       await firstValueFrom(
         this.http.post(
           `${this.uazapiBaseUrl}/message/presence`,
-          { number: normalizedPhone, presence: 'composing', delay: durationMs },
+          { number: phone, presence: 'composing', delay: durationMs },
           { headers: { token: this.uazapiToken } },
         ),
       );

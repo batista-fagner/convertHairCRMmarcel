@@ -665,7 +665,8 @@ Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas 
     }
 
     try {
-      const phone = lead.phone.startsWith('55') ? lead.phone : `55${lead.phone}`;
+      // lead.phone já vem completo (com DDI correto) — não prefixar 55.
+      const phone = lead.phone;
       await firstValueFrom(
         this.http.post(
           `${this.uazapiBaseUrl}/send/text`,
@@ -699,7 +700,8 @@ Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas 
     }
 
     try {
-      const phone = lead.phone.startsWith('55') ? lead.phone : `55${lead.phone}`;
+      // lead.phone já vem completo (com DDI correto) — não prefixar 55.
+      const phone = lead.phone;
       // Padrão do efraim.controller: /send/media com file=URL pública, text=legenda.
       await firstValueFrom(
         this.http.post(
