@@ -73,6 +73,44 @@ export class ManualMessageController {
     return { ok: true };
   }
 
+  @Post(':id/fetch-avatar')
+  async fetchAvatar(@Param('id') id: string) {
+    const lead = await this.leadsRepo.findOne({ where: { id } });
+    if (!lead) throw new HttpException('Lead not found', HttpStatus.NOT_FOUND);
+    if (!this.uazapiToken) {
+      throw new HttpException('WhatsApp não configurado (SDR_UAZAPI_TOKEN ausente)', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    // lead.phone já vem completo (com DDI correto) — não prefixar 55.
+    const phone = lead.phone;
+
+    try {
+      const res = await firstValueFrom(
+        this.http.post(
+          `${this.uazapiBaseUrl}/chat/details`,
+          { number: phone, preview: true },
+          { headers: { token: this.uazapiToken } },
+        ),
+      );
+      const data = res.data as { imagePreview?: string; image?: string; name?: string; wa_contactName?: string; wa_name?: string };
+      const avatarUrl = data.imagePreview || data.image || null;
+      const realName = data.name || data.wa_contactName || data.wa_name;
+
+      const patch: Record<string, any> = { avatarUrl };
+      // Só sobrescreve o nome se ainda estiver no placeholder "Lead XXXX" —
+      // não pisa em cima de um nome já coletado pela IA ou editado manualmente.
+      if (realName && /^Lead \d+$/.test(lead.name)) patch.name = realName;
+
+      await this.leadsRepo.update(id, patch);
+      const fresh = await this.leadsRepo.findOne({ where: { id } });
+      if (fresh) this.realtime.emitLeadUpdated(fresh);
+      return { avatarUrl, name: patch.name };
+    } catch (err: any) {
+      this.logger.warn(`[Manual] Falha ao buscar foto de perfil de ${phone}: ${err.message}`);
+      return { avatarUrl: null };
+    }
+  }
+
   private async dispatchToUazapi(phone: string, body: SendMessageDto) {
     const headers = { token: this.uazapiToken };
     const base = this.uazapiBaseUrl;

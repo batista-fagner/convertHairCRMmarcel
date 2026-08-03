@@ -47,7 +47,7 @@ const NAV_GROUPS = [
     label: 'Automação',
     items: [
       { icon: Mail, label: 'Email Sequences', path: '/email-sequences', disabled: true },
-      { icon: MessageCircle, label: 'WhatsApp', path: '/whatsapp' },
+      { icon: MessageCircle, label: 'WhatsApp', path: '/whatsapp', disabled: true },
     ],
   },
   {

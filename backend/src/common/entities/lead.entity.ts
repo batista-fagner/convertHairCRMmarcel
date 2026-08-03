@@ -236,6 +236,9 @@ export class Lead {
   @Column({ name: 'notes', type: 'text', nullable: true })
   notes?: string | null;
 
+  @Column({ name: 'avatar_url', type: 'varchar', nullable: true })
+  avatarUrl?: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

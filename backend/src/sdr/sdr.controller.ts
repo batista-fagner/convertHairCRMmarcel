@@ -248,6 +248,39 @@ export class SdrController {
     }
   }
 
+  /**
+   * Busca foto de perfil e nome real do WhatsApp (via /chat/details) e salva no
+   * lead — roda em segundo plano (fire-and-forget), sem atrasar a resposta ao
+   * lead. Só sobrescreve o nome se ainda estiver no placeholder "Lead XXXX".
+   */
+  private async fetchAndSaveAvatar(leadId: string, phone: string, currentName?: string): Promise<string | undefined> {
+    if (!this.uazapiToken) return undefined;
+    try {
+      const res = await firstValueFrom(
+        this.http.post(
+          `${this.uazapiBaseUrl}/chat/details`,
+          { number: phone, preview: true },
+          { headers: { token: this.uazapiToken } },
+        ),
+      );
+      const data = res.data as { imagePreview?: string; image?: string; name?: string; wa_contactName?: string; wa_name?: string };
+      const avatarUrl = data.imagePreview || data.image;
+      const realName = data.name || data.wa_contactName || data.wa_name;
+
+      const patch: Partial<Lead> = {};
+      if (avatarUrl) patch.avatarUrl = avatarUrl;
+      if (realName && currentName && /^Lead \d+$/.test(currentName)) patch.name = realName;
+      if (!Object.keys(patch).length) return undefined;
+
+      const updated = await this.leadsService.update(leadId, patch);
+      this.realtime.emitLeadUpdated(updated);
+      return patch.name;
+    } catch (err: any) {
+      this.logger.warn(`[SDR] Erro ao buscar foto/nome de ${phone}: ${err.message}`);
+      return undefined;
+    }
+  }
+
   /** "opa"/"ok" digitados pelo operador direto no WhatsApp pausam/reativam a IA daquele lead. */
   private async toggleAiByKeyword(phone: string, pause: boolean) {
     const lead = await this.findLeadByPhoneVariants(phone);
@@ -301,6 +334,7 @@ export class SdrController {
         ctwaAdTitle: ctwa?.adTitle,
       });
       isNew = true;
+      this.fetchAndSaveAvatar(lead.id, lead.phone, lead.name);
       if (fromAd) {
         this.logger.log(`[SDR] Lead ${phone} veio de anúncio CTWA (ctwa_clid=${ctwa!.clid}, ad="${ctwa?.adTitle ?? ctwa?.sourceId ?? '?'}")`);
         // Enriquece com nome real de campanha/conjunto/anúncio via Marketing API,
