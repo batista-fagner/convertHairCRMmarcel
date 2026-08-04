@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Logger, Param } from '@nestjs/common';
+import { Controller, Post, Body, Logger, Param, HttpException, HttpStatus } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -96,6 +96,86 @@ export class SdrController {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || 'https://free.uazapi.com';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
     this.operatorPhone = config.get('SDR_OPERATOR_PHONE') || '';
+  }
+
+  /**
+   * Abertura fixa (NÃO gerada pela IA) pra quando é o SISTEMA que puxa a
+   * conversa primeiro — lead entrou pelo ghl-capture mas nunca mandou nada.
+   * Diferente da abertura normal (IA responde livre quando o lead manda "oi"):
+   * aqui o texto é sempre este, só trocando o nome quando disponível (nunca o
+   * placeholder "Lead XXXX"). "|||" = 2 bolhas de WhatsApp, mesmo padrão do
+   * resto do sistema (ver splitBubbles).
+   */
+  private buildProactiveOpening(name?: string | null): string {
+    const trimmed = (name || '').trim();
+    const validName = trimmed && !/^Lead \d+$/i.test(trimmed) ? trimmed.split(' ')[0] : '';
+    const greeting = validName
+      ? `Oi ${validName}, vi que você se interessou pela sessão estratégica do Marcel.`
+      : 'Oi, vi que você se interessou pela sessão estratégica do Marcel.';
+    return `${greeting}|||Você já é dona do seu próprio schedule ou ainda trabalha como helper?`;
+  }
+
+  /**
+   * Envia a abertura proativa e registra no histórico como se fosse a 1ª bolha
+   * da Clara — dali em diante a conversa segue 100% normal (resposta da lead
+   * cai no webhook de sempre e processMessage já acha essa msg no aiContext).
+   */
+  private async sendProactiveOpening(lead: Lead) {
+    const reply = this.buildProactiveOpening(lead.name);
+    await this.sendReplyAsBubbles(lead.phone, reply);
+
+    const contextReply = reply.replace(/\|\|\|/g, '\n');
+    const ctx = [
+      ...(Array.isArray(lead.aiContext) ? lead.aiContext : []),
+      { role: 'assistant', content: contextReply, timestamp: new Date().toISOString() },
+    ];
+
+    const updated = await this.leadsService.update(lead.id, {
+      aiContext: ctx,
+      waStage: 'abertura' as WaStage,
+      waLastMessageAt: new Date(),
+      followupSentAt: null,
+    });
+    this.realtime.emitLeadUpdated(updated);
+    this.logger.log(`[SDR] Abertura proativa enviada para ${lead.phone}`);
+  }
+
+  // Feature em teste — só libera pra esse número enquanto valida com o Marcel.
+  // Remover essa restrição quando for liberar pra qualquer lead (ex.: plugar
+  // num cron que varre leads sem wa_last_message_at).
+  private static readonly TRIGGER_OPENING_TEST_PHONE = '15564999958';
+
+  /**
+   * Dispara manualmente a abertura proativa pra um lead específico (teste ou
+   * reprocessamento pontual). Recusa quem já tem conversa iniciada — essa
+   * abertura é só pra quem nunca trocou nenhuma mensagem com a Clara.
+   */
+  @Post('sdr/trigger-opening')
+  async triggerOpening(@Body() body: { phone: string }) {
+    const phone = (body.phone || '').replace(/\D/g, '');
+    if (!phone) throw new HttpException('Telefone é obrigatório', HttpStatus.BAD_REQUEST);
+
+    if (phone !== SdrController.TRIGGER_OPENING_TEST_PHONE) {
+      throw new HttpException('Abertura proativa ainda em teste — liberada só pro número de teste', HttpStatus.FORBIDDEN);
+    }
+
+    let lead = await this.findLeadByPhoneVariants(phone);
+    if (!lead) {
+      lead = await this.leadsService.create({
+        name: `Lead ${phone.slice(-4)}`,
+        phone,
+        agentMode: 'sdr',
+        kanbanStage: 'novo',
+      });
+      this.realtime.emitLeadCreated(lead);
+    }
+
+    if (Array.isArray(lead.aiContext) && lead.aiContext.length > 0) {
+      throw new HttpException('Lead já tem conversa iniciada — abertura proativa é só pra quem nunca trocou mensagem', HttpStatus.CONFLICT);
+    }
+
+    await this.sendProactiveOpening(lead);
+    return { ok: true };
   }
 
   @Post('sdr/:eventType')
