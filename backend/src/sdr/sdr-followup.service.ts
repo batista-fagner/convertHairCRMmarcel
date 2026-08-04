@@ -400,7 +400,14 @@ export class SdrFollowupService {
       const nextNurtureAt = nextOffset != null ? new Date(Date.now() + nextOffset * 60_000) : null;
       await this.leadsRepo.update(lead.id, { nextNurtureAt });
 
-      const message = await this.generateScheduleReminderFollowup(lead, offsetMinutes);
+      // Só faz sentido perguntar "já viu os horários?" pra quem já respondeu a
+      // pergunta única (Clara só mostra a agenda depois disso) — donaDeSchedule
+      // ainda null significa que ela sumiu ANTES de responder, então o toque
+      // precisa retomar essa pergunta, não presumir uma agenda que nunca foi
+      // oferecida (ver lead.donaDeSchedule em sdr.service.ts).
+      const message = lead.donaDeSchedule == null
+        ? await this.generateEarlyStageFollowup(lead, offsetMinutes)
+        : await this.generateScheduleReminderFollowup(lead, offsetMinutes);
       if (!message) continue;
 
       if (sent > 0) {
@@ -600,6 +607,69 @@ ${tomBlock}`;
       return response.choices[0].message.content?.trim() ?? '';
     } catch (err: any) {
       this.logger.error(`[Followup] Erro ao gerar follow-up para ${lead.phone}: ${err.message}`);
+      return '';
+    }
+  }
+
+  /**
+   * Follow-up da cadência pra quem sumiu ANTES de responder a pergunta única
+   * (donaDeSchedule ainda null) — ela recebeu a abertura da Clara mas nunca
+   * disse se é dona do próprio schedule ou helper, então a agenda nunca foi
+   * oferecida ainda. Retoma essa MESMA pergunta com outras palavras; NUNCA
+   * pergunta sobre horários/agenda aqui (isso é generateScheduleReminderFollowup,
+   * usado só depois que ela responder).
+   */
+  private async generateEarlyStageFollowup(lead: Lead, delayMinutes: number): Promise<string> {
+    try {
+      const basePrompt = await this.settings.getSdrPrompt();
+      const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
+
+      const history: OpenAI.Chat.ChatCompletionMessageParam[] = (Array.isArray(lead.aiContext) ? lead.aiContext : []).map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content ?? '',
+      }));
+
+      const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
+
+      const previousFollowups = history
+        .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
+        .slice(-3)
+        .map((m) => (m.content as string));
+
+      const antiRepeatBlock = previousFollowups.length
+        ? `\n\nMENSAGENS ANTERIORES QUE VOCÊ (OU UM FOLLOW-UP ANTERIOR) JÁ MANDOU NESTA CONVERSA — PROIBIDO repetir a mesma frase de abertura ou reusar qualquer uma dessas quase palavra por palavra, tem que soar como uma mensagem NOVA e diferente:\n${previousFollowups.map((t) => `- "${t}"`).join('\n')}`
+        : '';
+
+      const instruction = `IMPORTANTE — ISSO NÃO É REATIVAÇÃO GENÉRICA NEM PERGUNTA SOBRE AGENDA: você mandou a abertura pra ela apresentando a Clara e perguntando se ela já é dona do próprio schedule ou ainda trabalha como helper, mas faz ${hours} e ela não respondeu essa pergunta (ou a mensagem que ela mandou não deixou isso claro).
+
+PROIBIDO nesta mensagem: falar de horários, agenda ou Sessão de Mentoria — isso só vem DEPOIS que ela responder a pergunta única, e ela ainda não respondeu.
+
+SUA ÚNICA MISSÃO: gerar UMA mensagem curta retomando a MESMA pergunta única (dona do próprio schedule ou helper), com outras palavras — nunca repita a frase exata da abertura.${antiRepeatBlock}
+
+TOM:
+- Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
+- Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
+- Trate por "vc", nunca "você" por extenso.
+- No máximo 1 emoji, só se soar natural.
+- Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
+- Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
+
+Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas ao redor.`;
+
+      const response = await this.openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: basePrompt },
+          ...history,
+          { role: 'system', content: instruction },
+        ],
+        temperature: 0.8,
+        max_completion_tokens: 150,
+      });
+
+      return response.choices[0].message.content?.trim() ?? '';
+    } catch (err: any) {
+      this.logger.error(`[Followup] Erro ao gerar follow-up de retomada (pergunta única) para ${lead.phone}: ${err.message}`);
       return '';
     }
   }

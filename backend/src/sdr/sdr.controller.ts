@@ -120,9 +120,19 @@ export class SdrController {
    * da Clara — dali em diante a conversa segue 100% normal (resposta da lead
    * cai no webhook de sempre e processMessage já acha essa msg no aiContext).
    */
-  private async sendProactiveOpening(lead: Lead) {
+  /**
+   * Só grava a abertura como enviada se a uazapi confirmou o envio de TODAS as
+   * bolhas — senão o lead fica exatamente como estava (sem aiContext, sem
+   * waLastMessageAt), pra poder tentar de novo depois em vez de ficar
+   * marcado como "já iniciado" sem a mensagem ter chegado de verdade.
+   */
+  private async sendProactiveOpening(lead: Lead): Promise<boolean> {
     const reply = this.buildProactiveOpening(lead.name);
-    await this.sendReplyAsBubbles(lead.phone, reply);
+    const sent = await this.sendReplyAsBubbles(lead.phone, reply);
+    if (!sent) {
+      this.logger.warn(`[SDR] Abertura proativa NÃO confirmada pela uazapi para ${lead.phone} — lead não marcado como iniciado`);
+      return false;
+    }
 
     const contextReply = reply.replace(/\|\|\|/g, '\n');
     const ctx = [
@@ -138,6 +148,7 @@ export class SdrController {
     });
     this.realtime.emitLeadUpdated(updated);
     this.logger.log(`[SDR] Abertura proativa enviada para ${lead.phone}`);
+    return true;
   }
 
   // Feature em teste — só libera pra esse número enquanto valida com o Marcel.
@@ -174,7 +185,10 @@ export class SdrController {
       throw new HttpException('Lead já tem conversa iniciada — abertura proativa é só pra quem nunca trocou mensagem', HttpStatus.CONFLICT);
     }
 
-    await this.sendProactiveOpening(lead);
+    const sent = await this.sendProactiveOpening(lead);
+    if (!sent) {
+      throw new HttpException('WhatsApp não confirmou o envio (uazapi retornou erro) — nada foi gravado, pode tentar de novo', HttpStatus.BAD_GATEWAY);
+    }
     return { ok: true };
   }
 
@@ -685,7 +699,8 @@ export class SdrController {
     );
   }
 
-  private async sendMessage(phone: string, text: string) {
+  /** Retorna se a uazapi confirmou o envio (true) ou não (false) — quem chama decide o que fazer com a falha. */
+  private async sendMessage(phone: string, text: string): Promise<boolean> {
     try {
       // phone já vem completo (com DDI correto) direto do JID do WhatsApp —
       // não prefixar 55 aqui (mesmo bug do create acima).
@@ -697,8 +712,10 @@ export class SdrController {
         ),
       );
       this.logger.log(`[SDR] respondeu para ${phone}`);
+      return true;
     } catch (err: any) {
       this.logger.error(`[SDR] Erro ao enviar resposta para ${phone}: ${err.message}`);
+      return false;
     }
   }
 
@@ -740,15 +757,22 @@ export class SdrController {
     return Math.min(6000, Math.max(1200, Math.round(text.length * msPerChar)));
   }
 
-  /** Envia a resposta da IA em uma ou mais bolhas, cada uma com "digitando..." proporcional ao tamanho do texto. */
-  private async sendReplyAsBubbles(phone: string, reply: string) {
+  /**
+   * Envia a resposta da IA em uma ou mais bolhas, cada uma com "digitando..." proporcional
+   * ao tamanho do texto. Retorna false se QUALQUER bolha falhar — quem chama decide se isso
+   * bloqueia gravar a mensagem como enviada (ver sendProactiveOpening).
+   */
+  private async sendReplyAsBubbles(phone: string, reply: string): Promise<boolean> {
     const bubbles = this.splitBubbles(reply);
+    let allOk = true;
     for (const bubble of bubbles) {
       const delay = this.typingDelayForText(bubble);
       await this.sendTyping(phone, delay);
       await new Promise((r) => setTimeout(r, delay));
-      await this.sendMessage(phone, bubble);
+      const ok = await this.sendMessage(phone, bubble);
+      if (!ok) allOk = false;
     }
+    return allOk;
   }
 
   private async sendTyping(phone: string, durationMs: number) {
