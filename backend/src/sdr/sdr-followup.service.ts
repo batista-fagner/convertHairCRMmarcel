@@ -626,9 +626,18 @@ ${tomBlock}`;
 
       const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
 
+      const previousFollowups = history
+        .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
+        .slice(-3)
+        .map((m) => (m.content as string));
+
+      const antiRepeatBlock = previousFollowups.length
+        ? `\n\nMENSAGENS ANTERIORES QUE VOCÊ (OU UM FOLLOW-UP ANTERIOR) JÁ MANDOU NESTA CONVERSA — PROIBIDO repetir a mesma frase de abertura ou reusar qualquer uma dessas quase palavra por palavra, tem que soar como uma mensagem NOVA e diferente:\n${previousFollowups.map((t) => `- "${t}"`).join('\n')}`
+        : '';
+
       const instruction = `IMPORTANTE — ISSO NÃO É QUALIFICAÇÃO NEM REATIVAÇÃO GENÉRICA: você já ofereceu horários da agenda pra Sessão de Mentoria Gratuita com o Marcel, mas ela não confirmou nenhum ainda (faz ${hours} desde então, sem resposta).
 
-SUA ÚNICA MISSÃO: gerar UMA mensagem curta e educada perguntando se ela já conseguiu ver os horários e escolher um, se oferecendo pra ajudar a escolher. NÃO repita a lista de horários inteira de novo — só pergunte, e se ela pedir, você mostra de novo na próxima resposta (fora deste follow-up).
+SUA ÚNICA MISSÃO: gerar UMA mensagem curta e educada perguntando se ela já conseguiu ver os horários e escolher um, se oferecendo pra ajudar a escolher. NÃO repita a lista de horários inteira de novo — só pergunte, e se ela pedir, você mostra de novo na próxima resposta (fora deste follow-up).${antiRepeatBlock}
 
 TOM:
 - Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
