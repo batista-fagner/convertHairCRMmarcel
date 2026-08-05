@@ -93,6 +93,12 @@ export class SdrController {
   // que o deploy sobe.
   private static readonly NEVER_STARTED_FEATURE_LAUNCH_AT = new Date();
 
+  // Quando vários leads viram elegíveis pra abertura proativa na mesma janela,
+  // manda um de cada vez com esse intervalo entre eles — evita disparar vários
+  // números novos "de uma vez" pro WhatsApp, o que pode acionar restrição/ban
+  // da conta.
+  private static readonly NEVER_STARTED_STAGGER_MS = 40_000;
+
   constructor(
     private readonly sdrService: SdrService,
     private readonly leadsService: LeadsService,
@@ -128,7 +134,7 @@ export class SdrController {
       let sent = 0;
       for (const lead of leads) {
         if (sent > 0) {
-          await new Promise((r) => setTimeout(r, 5000 + Math.random() * 5000));
+          await new Promise((r) => setTimeout(r, SdrController.NEVER_STARTED_STAGGER_MS));
         }
         const ok = await this.sendProactiveOpening(lead);
         if (ok) sent++;
