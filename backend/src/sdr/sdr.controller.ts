@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Logger, Param, HttpException, HttpStatus } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -80,6 +81,17 @@ export class SdrController {
   private readonly uazapiBaseUrl: string;
   private readonly uazapiToken: string;
   private readonly operatorPhone: string;
+  private checkingNeverStarted = false;
+
+  // Tempo de espera antes de considerar que o lead "não vai iniciar sozinho" e
+  // mandar a abertura proativa (ver checkNeverStartedLeads abaixo).
+  private static readonly NEVER_STARTED_WAIT_MINUTES = 5;
+
+  // Leads criados antes do deploy dessa feature (ex.: Jaqueline/Flavia, que já
+  // têm envio agendado separadamente pras 9am de NY) não entram nesse cron —
+  // só vale pra quem chegar dali pra frente. Evita disparo retroativo assim
+  // que o deploy sobe.
+  private static readonly NEVER_STARTED_FEATURE_LAUNCH_AT = new Date();
 
   constructor(
     private readonly sdrService: SdrService,
@@ -96,6 +108,37 @@ export class SdrController {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || 'https://free.uazapi.com';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
     this.operatorPhone = config.get('SDR_OPERATOR_PHONE') || '';
+  }
+
+  /**
+   * A cada minuto, varre leads do SDR que nunca trocaram nenhuma mensagem e já
+   * passaram do prazo de espera (5min desde created_at) — manda a abertura
+   * proativa automaticamente. Se o lead iniciar sozinho antes disso, ele sai
+   * da consulta (wa_last_message_at deixa de ser null) e o fluxo normal segue,
+   * sem essa abordagem. `checkingNeverStarted` evita rodar 2x sobreposto
+   * (o envio real com "digitando..." pode levar alguns segundos por lead).
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async checkNeverStartedLeads() {
+    if (this.checkingNeverStarted) return;
+    this.checkingNeverStarted = true;
+    try {
+      const cutoff = new Date(Date.now() - SdrController.NEVER_STARTED_WAIT_MINUTES * 60 * 1000);
+      const leads = await this.leadsService.findNeverStartedOlderThan(cutoff, SdrController.NEVER_STARTED_FEATURE_LAUNCH_AT);
+      let sent = 0;
+      for (const lead of leads) {
+        if (sent > 0) {
+          await new Promise((r) => setTimeout(r, 5000 + Math.random() * 5000));
+        }
+        const ok = await this.sendProactiveOpening(lead);
+        if (ok) sent++;
+      }
+      if (leads.length) {
+        this.logger.log(`[SDR] Abertura proativa automática: ${sent}/${leads.length} enviada(s)`);
+      }
+    } finally {
+      this.checkingNeverStarted = false;
+    }
   }
 
   /**

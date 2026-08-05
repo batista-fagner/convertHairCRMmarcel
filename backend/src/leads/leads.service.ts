@@ -32,6 +32,24 @@ export class LeadsService {
     return this.leadsRepo.findOne({ where: { phone } });
   }
 
+  /**
+   * Leads do SDR que nunca trocaram nenhuma mensagem (aiContext vazio/null,
+   * sem wa_last_message_at) e já passaram do prazo de espera — candidatos pra
+   * abertura proativa (ver checkNeverStartedLeads em sdr.controller.ts).
+   * ai_paused=false exclui quem foi pausado manualmente (ex.: lead de teste).
+   */
+  async findNeverStartedOlderThan(cutoff: Date, createdAfter?: Date): Promise<Lead[]> {
+    const query = this.leadsRepo
+      .createQueryBuilder('lead')
+      .where('lead.agent_mode = :mode', { mode: 'sdr' })
+      .andWhere('lead.ai_paused = false')
+      .andWhere('lead.wa_last_message_at IS NULL')
+      .andWhere('(lead.ai_context IS NULL OR jsonb_array_length(lead.ai_context) = 0)')
+      .andWhere('lead.created_at <= :cutoff', { cutoff });
+    if (createdAfter) query.andWhere('lead.created_at >= :createdAfter', { createdAfter });
+    return query.getMany();
+  }
+
   async findAll(opts?: { campaignId?: string; page?: number; limit?: number; source?: 'all' | 'ig_dm' | 'paid'; search?: string }): Promise<{ data: Lead[]; total: number; page: number; totalPages: number }> {
     const page = opts?.page || 1;
     const limit = opts?.limit || 6;
