@@ -105,8 +105,13 @@ export class SdrController {
    * aqui o texto é sempre este, aprovado pelo Marcel. "|||" = 2 bolhas de
    * WhatsApp, mesmo padrão do resto do sistema (ver splitBubbles).
    */
-  private buildProactiveOpening(): string {
-    return '🎉 Parabéns por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!|||Você já é dona do seu próprio schedule ou ainda trabalha como helper?';
+  private buildProactiveOpening(name?: string | null): string {
+    const trimmed = (name || '').trim();
+    const validName = trimmed && !/^Lead \d+$/i.test(trimmed) ? trimmed.split(' ')[0] : '';
+    const greeting = validName
+      ? `🎉 Parabéns ${validName} por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!`
+      : '🎉 Parabéns por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!';
+    return `${greeting}|||Você já é dona do seu próprio schedule ou ainda trabalha como helper?`;
   }
 
   /**
@@ -121,7 +126,7 @@ export class SdrController {
    * marcado como "já iniciado" sem a mensagem ter chegado de verdade.
    */
   private async sendProactiveOpening(lead: Lead): Promise<boolean> {
-    const reply = this.buildProactiveOpening();
+    const reply = this.buildProactiveOpening(lead.name);
     const sent = await this.sendReplyAsBubbles(lead.phone, reply);
     if (!sent) {
       this.logger.warn(`[SDR] Abertura proativa NÃO confirmada pela uazapi para ${lead.phone} — lead não marcado como iniciado`);
@@ -145,24 +150,16 @@ export class SdrController {
     return true;
   }
 
-  // Feature em teste — só libera pra esse número enquanto valida com o Marcel.
-  // Remover essa restrição quando for liberar pra qualquer lead (ex.: plugar
-  // num cron que varre leads sem wa_last_message_at).
-  private static readonly TRIGGER_OPENING_TEST_PHONE = '557192867765';
-
   /**
-   * Dispara manualmente a abertura proativa pra um lead específico (teste ou
-   * reprocessamento pontual). Recusa quem já tem conversa iniciada — essa
-   * abertura é só pra quem nunca trocou nenhuma mensagem com a Clara.
+   * Dispara manualmente a abertura proativa pra um lead específico (validado
+   * com o Marcel, liberado pra qualquer lead). Recusa quem já tem conversa
+   * iniciada — essa abertura é só pra quem nunca trocou nenhuma mensagem com
+   * a Clara.
    */
   @Post('sdr/trigger-opening')
   async triggerOpening(@Body() body: { phone: string }) {
     const phone = (body.phone || '').replace(/\D/g, '');
     if (!phone) throw new HttpException('Telefone é obrigatório', HttpStatus.BAD_REQUEST);
-
-    if (phone !== SdrController.TRIGGER_OPENING_TEST_PHONE) {
-      throw new HttpException('Abertura proativa ainda em teste — liberada só pro número de teste', HttpStatus.FORBIDDEN);
-    }
 
     let lead = await this.findLeadByPhoneVariants(phone);
     if (!lead) {
