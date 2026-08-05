@@ -71,7 +71,11 @@ export class LeadsController {
       email,
       agentMode: 'sdr',
       kanbanStage: 'novo',
-      kanbanStageManual: true,
+      // NÃO trava manual aqui — isso é cadastro automático do funil (ninguém
+      // arrastou o card), diferente de createManual acima. Travar aqui
+      // desligava a movimentação automática da raia pro lead inteiro, desde a
+      // criação — bug real que travou Glaucia, Giovana, Neuza, Jaqueline e
+      // Flavia em "Novo" mesmo depois de a conversa avançar.
       ghlContext: body as any,
     });
     this.realtime.emitLeadCreated(lead);
