@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { io } from 'socket.io-client'
-import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, MessageCircle, PauseCircle, Bot, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Paperclip, Send, FileText, Video, StickyNote, ChevronDown, ChevronUp, Plus, CheckCircle2, Megaphone, Search, Layers } from 'lucide-react'
+import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, MessageCircle, PauseCircle, Bot, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Paperclip, Send, FileText, Video, StickyNote, ChevronDown, ChevronUp, Plus, CheckCircle2, Megaphone, Search, Layers, CalendarCheck } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 const SOCKET_URL = API.replace(/\/api\/?$/, '') || 'http://localhost:3002'
@@ -15,12 +15,8 @@ const COLUMNS = [
   { id: 'atendimento',     title: 'Atendimento',     icon: HeadphonesIcon,  accent: 'indigo',  dot: 'bg-indigo-400' },
   { id: 'nao-qualificado', title: 'Não qualificado', icon: Snowflake,       accent: 'cyan',    dot: 'bg-cyan-400' },
   { id: 'qualificado',     title: 'Qualificado',     icon: Flame,           accent: 'rose',    dot: 'bg-rose-500' },
-  { id: 'contactado',      title: 'Contactado',      icon: Phone,           accent: 'teal',    dot: 'bg-teal-400' },
-  { id: 'ja-fez-prompt',   title: 'Já fez prompt',   icon: Play,            accent: 'violet',  dot: 'bg-violet-400' },
-  { id: 'ja-apresentado',  title: 'Já apresentado',  icon: Eye,             accent: 'blue',    dot: 'bg-blue-400' },
-  { id: 'em-negociacao',   title: 'Em negociação',   icon: Handshake,       accent: 'amber',   dot: 'bg-amber-400' },
+  { id: 'agendado',        title: 'Agendado',        icon: CalendarCheck,   accent: 'violet',  dot: 'bg-violet-400' },
   { id: 'vendeu',          title: 'Vendeu',           icon: Trophy,          accent: 'emerald', dot: 'bg-emerald-500' },
-  { id: 'perdido',         title: 'Lead perdido',    icon: XCircle,         accent: 'red',     dot: 'bg-red-400' },
 ]
 
 const COLUMN_STYLES = {
@@ -850,7 +846,7 @@ function CreateLeadModal({ open, onClose, onCreate }) {
 }
 
 export default function KanbanLeads() {
-  const [board, setBoard] = useState({ novo: [], atendimento: [], 'nao-qualificado': [], qualificado: [], contactado: [], 'ja-fez-prompt': [], 'ja-apresentado': [], 'em-negociacao': [], vendeu: [], perdido: [] })
+  const [board, setBoard] = useState({ novo: [], atendimento: [], 'nao-qualificado': [], qualificado: [], agendado: [], vendeu: [] })
   const [loading, setLoading] = useState(true)
   const [connected, setConnected] = useState(false)
   const [activeId, setActiveId] = useState(null)
@@ -1027,12 +1023,8 @@ export default function KanbanLeads() {
           atendimento: data.atendimento || [],
           'nao-qualificado': data['nao-qualificado'] || [],
           qualificado: data.qualificado || [],
-          contactado: data.contactado || [],
-          'ja-fez-prompt': data['ja-fez-prompt'] || [],
-          'ja-apresentado': data['ja-apresentado'] || [],
-          'em-negociacao': data['em-negociacao'] || [],
+          agendado: data.agendado || [],
           vendeu: data.vendeu || [],
-          perdido: data.perdido || [],
         })
       })
       .catch((e) => console.error('Erro ao carregar Kanban', e))

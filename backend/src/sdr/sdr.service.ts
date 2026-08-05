@@ -59,7 +59,10 @@ export function deriveKanbanStage(
   stage: SdrStage,
   status: string | undefined,
 ): KanbanStage {
-  if (status === 'perdido' || stage === 'perdido') return 'perdido';
+  // Não existe raia própria pra "perdido" no Kanban — funde em "Não
+  // qualificado" (o Kanban não tem coluna pra isso, mas o dado de perda em si
+  // continua rastreável via `lead.status`/`ai_context`).
+  if (status === 'perdido' || stage === 'perdido') return 'nao-qualificado';
   if (donaDeSchedule === true) return 'qualificado';
   if (stage === 'abertura') return 'novo';
   return 'atendimento';

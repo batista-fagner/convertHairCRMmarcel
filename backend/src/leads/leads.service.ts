@@ -140,7 +140,7 @@ export class LeadsService {
       order: { updatedAt: 'DESC' },
       take: 400,
     });
-    const board: Record<KanbanStage, Lead[]> = { novo: [], atendimento: [], 'nao-qualificado': [], qualificado: [], contactado: [], 'ja-fez-prompt': [], 'ja-apresentado': [], 'em-negociacao': [], vendeu: [], perdido: [] };
+    const board: Record<KanbanStage, Lead[]> = { novo: [], atendimento: [], 'nao-qualificado': [], qualificado: [], agendado: [], vendeu: [] };
     for (const lead of leads) {
       const stage = (lead.kanbanStage as KanbanStage) || 'novo';
       (board[stage] || board.novo).push(lead);

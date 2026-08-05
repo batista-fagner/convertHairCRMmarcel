@@ -25,12 +25,8 @@ const KANBAN_STAGE_LABEL = {
   atendimento: 'Atendimento',
   'nao-qualificado': 'Não qualificado',
   qualificado: 'Qualificado',
-  contactado: 'Contactado',
-  'ja-fez-prompt': 'Já fez prompt',
-  'ja-apresentado': 'Já apresentado',
-  'em-negociacao': 'Em negociação',
+  agendado: 'Agendado',
   vendeu: 'Vendeu',
-  perdido: 'Lead perdido',
 }
 const KANBAN_STAGE_OPTIONS = Object.entries(KANBAN_STAGE_LABEL).map(([id, label]) => ({ id, label }))
 

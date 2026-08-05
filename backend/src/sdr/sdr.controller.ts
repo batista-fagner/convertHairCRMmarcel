@@ -644,7 +644,7 @@ export class SdrController {
     // banco. Também destrava (kanbanStageManual: false) pra não repetir o
     // problema nos próximos toques da IA com esse lead.
     if (!lead.kanbanStageManual || bookedNow) {
-      updateData.kanbanStage = derivedStage;
+      updateData.kanbanStage = bookedNow ? 'agendado' : derivedStage;
       if (bookedNow) updateData.kanbanStageManual = false;
     }
 
