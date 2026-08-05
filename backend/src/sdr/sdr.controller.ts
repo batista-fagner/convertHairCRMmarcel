@@ -102,17 +102,11 @@ export class SdrController {
    * Abertura fixa (NÃO gerada pela IA) pra quando é o SISTEMA que puxa a
    * conversa primeiro — lead entrou pelo ghl-capture mas nunca mandou nada.
    * Diferente da abertura normal (IA responde livre quando o lead manda "oi"):
-   * aqui o texto é sempre este, só trocando o nome quando disponível (nunca o
-   * placeholder "Lead XXXX"). "|||" = 2 bolhas de WhatsApp, mesmo padrão do
-   * resto do sistema (ver splitBubbles).
+   * aqui o texto é sempre este, aprovado pelo Marcel. "|||" = 2 bolhas de
+   * WhatsApp, mesmo padrão do resto do sistema (ver splitBubbles).
    */
-  private buildProactiveOpening(name?: string | null): string {
-    const trimmed = (name || '').trim();
-    const validName = trimmed && !/^Lead \d+$/i.test(trimmed) ? trimmed.split(' ')[0] : '';
-    const greeting = validName
-      ? `Oi ${validName}, vi que você se interessou pela sessão estratégica do Marcel.`
-      : 'Oi, vi que você se interessou pela sessão estratégica do Marcel.';
-    return `${greeting}|||Você já é dona do seu próprio schedule ou ainda trabalha como helper?`;
+  private buildProactiveOpening(): string {
+    return '🎉 Parabéns por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!|||Você já é dona do seu próprio schedule ou ainda trabalha como helper?';
   }
 
   /**
@@ -127,7 +121,7 @@ export class SdrController {
    * marcado como "já iniciado" sem a mensagem ter chegado de verdade.
    */
   private async sendProactiveOpening(lead: Lead): Promise<boolean> {
-    const reply = this.buildProactiveOpening(lead.name);
+    const reply = this.buildProactiveOpening();
     const sent = await this.sendReplyAsBubbles(lead.phone, reply);
     if (!sent) {
       this.logger.warn(`[SDR] Abertura proativa NÃO confirmada pela uazapi para ${lead.phone} — lead não marcado como iniciado`);
