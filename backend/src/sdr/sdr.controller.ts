@@ -194,6 +194,13 @@ export class SdrController {
       waLastMessageAt: new Date(),
       followupSentAt: null,
     });
+    // Sem isso, a cadência de follow-up nunca começava a contar pra quem
+    // recebeu a abertura proativa mas nunca respondeu — resetCadenceOnReply só
+    // roda em processMessage (mensagem REAL do lead). Resultado: Jaqueline e
+    // Flavia receberam a abertura e ficaram pra sempre sem follow-up nenhum
+    // agendado (next_nurture_at ficava null). Aqui a IA "falou primeiro", então
+    // conta como o mesmo marco de início de cadência.
+    await this.sdrFollowup.resetCadenceOnReply(lead.id);
     this.realtime.emitLeadUpdated(updated);
     this.logger.log(`[SDR] Abertura proativa enviada para ${lead.phone}`);
     return true;
