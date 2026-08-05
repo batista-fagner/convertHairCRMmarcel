@@ -148,7 +148,7 @@ export class SdrController {
   // Feature em teste — só libera pra esse número enquanto valida com o Marcel.
   // Remover essa restrição quando for liberar pra qualquer lead (ex.: plugar
   // num cron que varre leads sem wa_last_message_at).
-  private static readonly TRIGGER_OPENING_TEST_PHONE = '15564999958';
+  private static readonly TRIGGER_OPENING_TEST_PHONE = '557192867765';
 
   /**
    * Dispara manualmente a abertura proativa pra um lead específico (teste ou
