@@ -634,9 +634,18 @@ export class SdrController {
       updateData.nurturePaused = true;
     }
 
-    // Só atualiza a raia se o operador NÃO travou o card manualmente
-    if (!lead.kanbanStageManual) {
+    // Só atualiza a raia se o operador NÃO travou o card manualmente — exceto
+    // quando um agendamento REAL acabou de ser criado (bookedNow): isso é um
+    // fato objetivo (existe uma linha em `appointments`) que deve sempre
+    // prevalecer sobre uma trava manual antiga, mesmo travada. Sem essa exceção,
+    // um card travado (ex.: alguém arrastou sem querer meses atrás) fica preso
+    // pra sempre em "Novo" mesmo depois do lead agendar de verdade — já
+    // aconteceu 2x (Glaucia, Giovana), sempre precisando de correção manual no
+    // banco. Também destrava (kanbanStageManual: false) pra não repetir o
+    // problema nos próximos toques da IA com esse lead.
+    if (!lead.kanbanStageManual || bookedNow) {
       updateData.kanbanStage = derivedStage;
+      if (bookedNow) updateData.kanbanStageManual = false;
     }
 
     // Sem envio de evento Lead/MQL pro Meta neste tenant por enquanto — as
