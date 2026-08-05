@@ -33,6 +33,22 @@ export class AppointmentsService {
     });
   }
 
+  // Agendamentos que começam dentro da janela [from, to), ainda não lembrados,
+  // não cancelados/desmarcados e com telefone pra mandar o WhatsApp.
+  async findDueForReminder(from: Date, to: Date): Promise<Appointment[]> {
+    return this.repo
+      .createQueryBuilder('a')
+      .where('a.status = :status', { status: 'agendado' })
+      .andWhere('a.reminder_sent_at IS NULL')
+      .andWhere('a.client_phone IS NOT NULL')
+      .andWhere('a.start_date_time >= :from AND a.start_date_time < :to', { from, to })
+      .getMany();
+  }
+
+  async markReminderSent(id: string): Promise<void> {
+    await this.repo.update({ id }, { reminderSentAt: new Date() });
+  }
+
   async findOne(id: string): Promise<Appointment> {
     const appt = await this.repo.findOne({ where: { id }, relations: ['lead'] });
     if (!appt) throw new NotFoundException('Agendamento não encontrado');
