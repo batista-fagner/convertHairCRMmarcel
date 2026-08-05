@@ -148,39 +148,6 @@ export class SdrController {
   }
 
   /**
-   * A cada minuto, varre agendamentos que começam em ~10min e manda um
-   * lembrete de WhatsApp (anti no-show). Janela de 9-11min (em vez de exatos
-   * 10) pra não perder ninguém por causa do timing do cron rodando de minuto
-   * em minuto — `reminderSentAt` garante que não manda 2x pro mesmo
-   * agendamento mesmo caindo em 2 execuções seguidas.
-   */
-  @Cron(CronExpression.EVERY_MINUTE)
-  async sendAppointmentReminders() {
-    const from = new Date(Date.now() + 9 * 60 * 1000);
-    const to = new Date(Date.now() + 11 * 60 * 1000);
-    const appointments = await this.appointmentsService.findDueForReminder(from, to);
-    for (const appt of appointments) {
-      if (!appt.clientPhone) continue;
-      const firstName = (appt.clientName || '').trim().split(' ')[0] || '';
-      const hora = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true,
-      }).format(appt.startDateTime);
-      const reply = firstName
-        ? `Oi, ${firstName}! 👋 Passando pra lembrar que sua Sessão de Mentoria com o Marcel começa em 10 minutinhos, às ${hora}. Te espero lá! 🚀`
-        : `Oi! 👋 Passando pra lembrar que sua Sessão de Mentoria com o Marcel começa em 10 minutinhos, às ${hora}. Te espero lá! 🚀`;
-      const ok = await this.sendMessage(appt.clientPhone, reply);
-      if (ok) {
-        // Só marca como enviado se a uazapi confirmou — se falhar, tenta de
-        // novo na próxima execução (ainda dentro da janela de 2min).
-        await this.appointmentsService.markReminderSent(appt.id);
-        this.logger.log(`[SDR][AGENDA] Lembrete de 10min enviado pra ${appt.clientPhone} (agendamento ${appt.id})`);
-      } else {
-        this.logger.error(`[SDR][AGENDA] Falha ao enviar lembrete pra ${appt.clientPhone} (agendamento ${appt.id})`);
-      }
-    }
-  }
-
-  /**
    * Abertura fixa (NÃO gerada pela IA) pra quando é o SISTEMA que puxa a
    * conversa primeiro — lead entrou pelo ghl-capture mas nunca mandou nada.
    * Diferente da abertura normal (IA responde livre quando o lead manda "oi"):
