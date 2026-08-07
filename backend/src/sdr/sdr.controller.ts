@@ -165,7 +165,8 @@ export class SdrController {
       const hora = new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true,
       }).format(appt.startDateTime);
-      const reply = `Oi! ${firstName} Só lembrando que sua reunião com o Mentor Marcel é hoje às ${hora} — daqui a 1h. Até já!`;
+      const greeting = firstName ? `Oi! ${firstName}` : 'Oi!';
+      const reply = `${greeting} Só lembrando que sua reunião com o Mentor Marcel é hoje às ${hora} — daqui a 1h. Até já!`;
       const ok = await this.sendMessage(appt.clientPhone, reply);
       if (ok) {
         // Só marca como enviado se a uazapi confirmou — se falhar, tenta de
