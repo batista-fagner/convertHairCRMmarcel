@@ -37,12 +37,14 @@ export { FOLLOWUP_ENABLED_KEY, FOLLOWUP_DELAY_KEY, FOLLOWUP_MODE_KEY, FOLLOWUP_T
 const CADENCE_STEPS_MINUTES = [30, 120, 1440, 1440, 1440, 1440, 1440, 1440];
 
 interface CadenceWindow { start: number; end: number }
-// Janela de envio automático (nunca restringe o chat ao vivo, só o follow-up
-// automático): seg-sex 18h-22h, sáb 11h-17h, dom 15h-18h, tudo em BRT.
-const CADENCE_WINDOW: { weekday: CadenceWindow; saturday: CadenceWindow; sunday: CadenceWindow } = {
-  weekday: { start: 18, end: 22 },
-  saturday: { start: 11, end: 17 },
-  sunday: { start: 15, end: 18 },
+// Janelas de envio automático (nunca restringe o chat ao vivo, só o follow-up
+// automático), tudo em BRT. Cada dia pode ter mais de uma janela — a manhã
+// (6h-9h) existe pra quem respondeu tarde da noite não esperar até a janela
+// da tarde/noite pro próximo toque.
+const CADENCE_WINDOW: { weekday: CadenceWindow[]; saturday: CadenceWindow[]; sunday: CadenceWindow[] } = {
+  weekday: [{ start: 6, end: 9 }, { start: 18, end: 22 }],
+  saturday: [{ start: 6, end: 9 }, { start: 11, end: 17 }],
+  sunday: [{ start: 6, end: 9 }, { start: 15, end: 18 }],
 };
 
 // STOP determinístico (camada 1) — pausa a cadência na hora, sem depender da
@@ -339,9 +341,9 @@ export class SdrFollowupService {
 
   private isWithinCadenceWindow(): boolean {
     const dow = this.currentWeekdayBRT();
-    const window = dow === 0 ? CADENCE_WINDOW.sunday : dow === 6 ? CADENCE_WINDOW.saturday : CADENCE_WINDOW.weekday;
+    const windows = dow === 0 ? CADENCE_WINDOW.sunday : dow === 6 ? CADENCE_WINDOW.saturday : CADENCE_WINDOW.weekday;
     const h = this.currentHourBRT();
-    return h >= window.start && h < window.end;
+    return windows.some((w) => h >= w.start && h < w.end);
   }
 
   // A cada minuto: dispara os toques de cadência vencidos (nextNurtureAt <= agora),
