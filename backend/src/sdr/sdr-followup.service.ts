@@ -649,6 +649,7 @@ SUA ÚNICA MISSÃO: gerar UMA mensagem curta retomando a MESMA pergunta única (
 TOM:
 - Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
 - Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
+- PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
 - Trate por "vc", nunca "você" por extenso.
 - No máximo 1 emoji, só se soar natural.
 - Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
@@ -712,6 +713,7 @@ SUA ÚNICA MISSÃO: gerar UMA mensagem curta e educada perguntando se ela já co
 TOM:
 - Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
 - Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
+- PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
 - Trate por "vc", nunca "você" por extenso.
 - No máximo 1 emoji, só se soar natural.
 - Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
