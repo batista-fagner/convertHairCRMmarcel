@@ -40,6 +40,10 @@ export class Appointment {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
+  // Lembrete de 1h antes (anti no-show) — null até enviar, evita duplicar.
+  @Column({ name: 'reminder_sent_at', type: 'timestamp', nullable: true })
+  reminderSentAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -148,6 +148,37 @@ export class SdrController {
   }
 
   /**
+   * A cada minuto, varre agendamentos que começam em ~1h e manda um lembrete
+   * de WhatsApp (anti no-show). Janela de 59-61min (em vez de exatos 60) pra
+   * não perder ninguém por causa do timing do cron rodando de minuto em
+   * minuto — `reminderSentAt` garante que não manda 2x pro mesmo agendamento
+   * mesmo caindo em 2 execuções seguidas.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async sendAppointmentReminders() {
+    const from = new Date(Date.now() + 59 * 60 * 1000);
+    const to = new Date(Date.now() + 61 * 60 * 1000);
+    const appointments = await this.appointmentsService.findDueForReminder(from, to);
+    for (const appt of appointments) {
+      if (!appt.clientPhone) continue;
+      const firstName = (appt.clientName || '').trim().split(' ')[0] || '';
+      const hora = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true,
+      }).format(appt.startDateTime);
+      const reply = `Oi! ${firstName} Só lembrando que sua reunião com o Mentor Marcel é hoje às ${hora} — daqui a 1h. Até já!`;
+      const ok = await this.sendMessage(appt.clientPhone, reply);
+      if (ok) {
+        // Só marca como enviado se a uazapi confirmou — se falhar, tenta de
+        // novo na próxima execução (ainda dentro da janela de 2min).
+        await this.appointmentsService.markReminderSent(appt.id);
+        this.logger.log(`[SDR][AGENDA] Lembrete de 1h enviado pra ${appt.clientPhone} (agendamento ${appt.id})`);
+      } else {
+        this.logger.error(`[SDR][AGENDA] Falha ao enviar lembrete pra ${appt.clientPhone} (agendamento ${appt.id})`);
+      }
+    }
+  }
+
+  /**
    * Abertura fixa (NÃO gerada pela IA) pra quando é o SISTEMA que puxa a
    * conversa primeiro — lead entrou pelo ghl-capture mas nunca mandou nada.
    * Diferente da abertura normal (IA responde livre quando o lead manda "oi"):
