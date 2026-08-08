@@ -2,7 +2,11 @@ import { Controller, Get, Post, Put, Patch, Delete, Body, Param, BadRequestExcep
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { SdrFollowupService, VIDEO_LIMIT_KEY, DEFAULT_VIDEO_LIMIT } from './sdr-followup.service';
+import {
+  SdrFollowupService, VIDEO_LIMIT_KEY, DEFAULT_VIDEO_LIMIT,
+  DEFAULT_CADENCE_STEPS, DEFAULT_CADENCE_WINDOWS, MAX_CADENCE_STEPS, MAX_STEP_MINUTES,
+} from './sdr-followup.service';
+import type { CadenceConfig } from './sdr-followup.service';
 import { FollowupVideoService } from './followup-video.service';
 import type { UploadedVideoFile } from './followup-video.service';
 import { SettingsService } from '../settings/settings.service';
@@ -176,5 +180,33 @@ export class FollowupController {
     const limit = Math.max(1, Math.floor(Number(body.limit) || DEFAULT_VIDEO_LIMIT));
     await this.settings.set(VIDEO_LIMIT_KEY, String(limit));
     return { limit };
+  }
+
+  // ─── Cadência de múltiplos toques ───────────────────────────────────
+  // Passos e janelas de horário que antes eram constantes no código; agora
+  // editáveis na tela. `defaults` acompanha a resposta pro botão "Restaurar padrão".
+
+  @Get('cadence')
+  async getCadence() {
+    const config = await this.followupService.getCadenceConfig();
+    return {
+      ...config,
+      defaults: { steps: DEFAULT_CADENCE_STEPS, windows: DEFAULT_CADENCE_WINDOWS },
+      limits: { maxSteps: MAX_CADENCE_STEPS, maxStepMinutes: MAX_STEP_MINUTES },
+    };
+  }
+
+  @Put('cadence')
+  async setCadence(@Body() body: Partial<CadenceConfig>) {
+    try {
+      const config = await this.followupService.saveCadenceConfig(body);
+      return {
+        ...config,
+        defaults: { steps: DEFAULT_CADENCE_STEPS, windows: DEFAULT_CADENCE_WINDOWS },
+        limits: { maxSteps: MAX_CADENCE_STEPS, maxStepMinutes: MAX_STEP_MINUTES },
+      };
+    } catch (err: any) {
+      throw new BadRequestException(err.message || 'Cadência inválida');
+    }
   }
 }

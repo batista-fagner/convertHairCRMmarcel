@@ -28,31 +28,50 @@ const DEFAULT_VIDEO_LIMIT = 15;
 export { FOLLOWUP_ENABLED_KEY, FOLLOWUP_DELAY_KEY, FOLLOWUP_MODE_KEY, FOLLOWUP_TEXT_KEY, VIDEO_LIMIT_KEY, DEFAULT_VIDEO_LIMIT };
 
 // ─────────────────────────────────────────────────────────────────────────
-// CADÊNCIA DE FOLLOW-UP (múltiplos toques) — especificação real do Marcel
-// (Pro Cleaning): toque 1 aos 30min de inatividade; toque 2 +2h depois; se
-// ainda não respondeu, 1 toque/dia por mais 6 dias (8 toques no total).
+// CADÊNCIA DE FOLLOW-UP (múltiplos toques) — padrão de fábrica: toque 1 aos
+// 30min de inatividade; toque 2 +2h depois; se ainda não respondeu, 1 toque/dia
+// por mais 6 dias (8 toques, ~7 dias no total).
 // Reinicia (nurtureStep=0) toda vez que o lead responde. Independente do
 // sistema de FollowupRule acima (que é 1 disparo só, por raia/campanha) —
 // esse aqui é sempre ativo pra qualquer lead do SDR, sem precisar configurar regra.
-const CADENCE_STEPS_MINUTES = [30, 120, 1440, 1440, 1440, 1440, 1440, 1440];
+//
+// Estes valores são só o DEFAULT: o operador edita passos e janelas na tela de
+// Configurações e a versão salva em `settings` passa a valer (ver getCadenceConfig).
+const DEFAULT_CADENCE_STEPS = [30, 120, 1440, 1440, 1440, 1440, 1440, 1440];
 
-interface CadenceWindow { start: number; end: number }
+export interface CadenceWindow { start: number; end: number }
+export interface CadenceWindows { weekday: CadenceWindow[]; saturday: CadenceWindow[]; sunday: CadenceWindow[] }
+export interface CadenceConfig { enabled: boolean; steps: number[]; windows: CadenceWindows }
+
 // Janelas de envio automático (nunca restringe o chat ao vivo, só o follow-up
 // automático), tudo em BRT. Cada dia pode ter mais de uma janela — a manhã
 // (6h-9h) existe pra quem respondeu tarde da noite não esperar até a janela
 // da tarde/noite pro próximo toque.
-const CADENCE_WINDOW: { weekday: CadenceWindow[]; saturday: CadenceWindow[]; sunday: CadenceWindow[] } = {
+const DEFAULT_CADENCE_WINDOWS: CadenceWindows = {
   weekday: [{ start: 6, end: 9 }, { start: 18, end: 22 }],
   saturday: [{ start: 6, end: 9 }, { start: 11, end: 17 }],
   sunday: [{ start: 6, end: 9 }, { start: 15, end: 18 }],
 };
+
+const CADENCE_ENABLED_KEY = 'sdr_cadence_enabled';
+const CADENCE_STEPS_KEY = 'sdr_cadence_steps';
+const CADENCE_WINDOWS_KEY = 'sdr_cadence_windows';
+
+// Limites de sanidade pro que vem da tela (evita passo de 0min virar loop de
+// envio, ou uma lista gigante travar o cron).
+const MAX_CADENCE_STEPS = 30;
+const MAX_STEP_MINUTES = 43200; // 30 dias
 
 // STOP determinístico (camada 1) — pausa a cadência na hora, sem depender da
 // IA. A camada 2 (semântica) é o próprio ai.stage === 'perdido' da Clara,
 // tratada no sdr.controller.ts.
 const STOP_CADENCE_REGEX = /\bstop\b|\bpare\b|\bparar\b|cancela|n[aã]o\s+tenho\s+interesse|sem\s+interesse/i;
 
-export { CADENCE_STEPS_MINUTES, STOP_CADENCE_REGEX };
+export {
+  DEFAULT_CADENCE_STEPS, DEFAULT_CADENCE_WINDOWS, STOP_CADENCE_REGEX,
+  CADENCE_ENABLED_KEY, CADENCE_STEPS_KEY, CADENCE_WINDOWS_KEY,
+  MAX_CADENCE_STEPS, MAX_STEP_MINUTES,
+};
 
 @Injectable()
 export class SdrFollowupService {
@@ -65,6 +84,10 @@ export class SdrFollowupService {
   // Teto diário de vídeo — contador em memória, reseta quando muda o dia (BRT).
   private videoSentToday = 0;
   private videoSentDate = '';
+
+  // Cache da cadência: o cron roda a cada minuto e leria as 3 chaves toda vez.
+  // Invalidado no saveCadenceConfig, então a tela reflete na hora.
+  private cadenceCache: CadenceConfig | null = null;
 
   // Telemetria do cron (exposta em getStatus para o painel)
   private lastRunAt: Date | null = null;
@@ -308,9 +331,95 @@ export class SdrFollowupService {
 
   // ───────── Cadência de múltiplos toques (Marcel) ─────────
 
-  /** Lead respondeu → reinicia a cadência (toque 1 daqui 30min) e tira pausa de STOP anterior. */
+  /** Normaliza uma lista de janelas vinda da tela; descarta o que não faz sentido. */
+  private sanitizeWindows(raw: unknown, fallback: CadenceWindow[]): CadenceWindow[] {
+    if (!Array.isArray(raw)) return fallback;
+    const windows = raw
+      .map((w: any) => ({ start: Math.floor(Number(w?.start)), end: Math.floor(Number(w?.end)) }))
+      .filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end)
+        && w.start >= 0 && w.end <= 24 && w.start < w.end);
+    // Lista vazia é intencional (dia sem envio) só quando o operador mandou array vazio;
+    // se tudo foi descartado por ser inválido, mantém o fallback pra não silenciar a cadência.
+    return raw.length > 0 && windows.length === 0 ? fallback : windows;
+  }
+
+  /**
+   * Configuração atual da cadência (passos + janelas + on/off). Lê de `settings`
+   * e cai no default do código quando não há nada salvo ou o valor está corrompido.
+   */
+  async getCadenceConfig(): Promise<CadenceConfig> {
+    if (this.cadenceCache) return this.cadenceCache;
+
+    const [enabledRaw, stepsRaw, windowsRaw] = await Promise.all([
+      this.settings.get(CADENCE_ENABLED_KEY),
+      this.settings.get(CADENCE_STEPS_KEY),
+      this.settings.get(CADENCE_WINDOWS_KEY),
+    ]);
+
+    let steps = DEFAULT_CADENCE_STEPS;
+    if (stepsRaw) {
+      try {
+        const parsed = JSON.parse(stepsRaw);
+        const clean = Array.isArray(parsed)
+          ? parsed.map((n: any) => Math.floor(Number(n)))
+              .filter((n: number) => Number.isFinite(n) && n >= 1 && n <= MAX_STEP_MINUTES)
+              .slice(0, MAX_CADENCE_STEPS)
+          : [];
+        if (clean.length > 0) steps = clean;
+      } catch {
+        this.logger.warn(`[CADENCE] ${CADENCE_STEPS_KEY} inválido no banco — usando o padrão do código`);
+      }
+    }
+
+    let windows = DEFAULT_CADENCE_WINDOWS;
+    if (windowsRaw) {
+      try {
+        const parsed = JSON.parse(windowsRaw);
+        windows = {
+          weekday: this.sanitizeWindows(parsed?.weekday, DEFAULT_CADENCE_WINDOWS.weekday),
+          saturday: this.sanitizeWindows(parsed?.saturday, DEFAULT_CADENCE_WINDOWS.saturday),
+          sunday: this.sanitizeWindows(parsed?.sunday, DEFAULT_CADENCE_WINDOWS.sunday),
+        };
+      } catch {
+        this.logger.warn(`[CADENCE] ${CADENCE_WINDOWS_KEY} inválido no banco — usando o padrão do código`);
+      }
+    }
+
+    // Sem chave salva = ligada (preserva o comportamento de antes da tela existir).
+    this.cadenceCache = { enabled: enabledRaw == null ? true : enabledRaw === 'true', steps, windows };
+    return this.cadenceCache;
+  }
+
+  /** Salva a cadência vinda da tela e invalida o cache (vale já no próximo minuto). */
+  async saveCadenceConfig(input: Partial<CadenceConfig>): Promise<CadenceConfig> {
+    if (input.enabled !== undefined) {
+      await this.settings.set(CADENCE_ENABLED_KEY, input.enabled ? 'true' : 'false');
+    }
+    if (input.steps !== undefined) {
+      const clean = (Array.isArray(input.steps) ? input.steps : [])
+        .map((n) => Math.floor(Number(n)))
+        .filter((n) => Number.isFinite(n) && n >= 1 && n <= MAX_STEP_MINUTES)
+        .slice(0, MAX_CADENCE_STEPS);
+      if (clean.length === 0) throw new Error('A cadência precisa de pelo menos 1 toque válido');
+      await this.settings.set(CADENCE_STEPS_KEY, JSON.stringify(clean));
+    }
+    if (input.windows !== undefined) {
+      const w = input.windows;
+      await this.settings.set(CADENCE_WINDOWS_KEY, JSON.stringify({
+        weekday: this.sanitizeWindows(w?.weekday, DEFAULT_CADENCE_WINDOWS.weekday),
+        saturday: this.sanitizeWindows(w?.saturday, DEFAULT_CADENCE_WINDOWS.saturday),
+        sunday: this.sanitizeWindows(w?.sunday, DEFAULT_CADENCE_WINDOWS.sunday),
+      }));
+    }
+
+    this.cadenceCache = null;
+    return this.getCadenceConfig();
+  }
+
+  /** Lead respondeu → reinicia a cadência (toque 1 no 1º intervalo) e tira pausa de STOP anterior. */
   async resetCadenceOnReply(leadId: string): Promise<void> {
-    const nextNurtureAt = new Date(Date.now() + CADENCE_STEPS_MINUTES[0] * 60_000);
+    const { steps } = await this.getCadenceConfig();
+    const nextNurtureAt = new Date(Date.now() + steps[0] * 60_000);
     await this.leadsRepo.update(leadId, { nurtureStep: 0, nextNurtureAt, nurturePaused: false });
   }
 
@@ -339,11 +448,12 @@ export class SdrFollowupService {
     return map[short] ?? new Date().getDay();
   }
 
-  private isWithinCadenceWindow(): boolean {
+  private isWithinCadenceWindow(config: CadenceConfig): boolean {
     const dow = this.currentWeekdayBRT();
-    const windows = dow === 0 ? CADENCE_WINDOW.sunday : dow === 6 ? CADENCE_WINDOW.saturday : CADENCE_WINDOW.weekday;
+    const { windows } = config;
+    const todayWindows = dow === 0 ? windows.sunday : dow === 6 ? windows.saturday : windows.weekday;
     const h = this.currentHourBRT();
-    return windows.some((w) => h >= w.start && h < w.end);
+    return todayWindows.some((w) => h >= w.start && h < w.end);
   }
 
   // A cada minuto: dispara os toques de cadência vencidos (nextNurtureAt <= agora),
@@ -354,7 +464,10 @@ export class SdrFollowupService {
   // — só a orquestração de múltiplos toques + a mensagem são novas.
   @Cron(CronExpression.EVERY_MINUTE)
   async processNurtureCadence(): Promise<void> {
-    if (!this.isWithinCadenceWindow()) return;
+    const cadence = await this.getCadenceConfig();
+    if (!cadence.enabled) return;
+    if (!this.isWithinCadenceWindow(cadence)) return;
+    const steps = cadence.steps;
 
     const dueLeads = await this.leadsRepo
       .createQueryBuilder('lead')
@@ -368,9 +481,11 @@ export class SdrFollowupService {
     let sent = 0;
     for (const lead of dueLeads) {
       const stepIndex = lead.nurtureStep;
-      const offsetMinutes = CADENCE_STEPS_MINUTES[stepIndex];
+      const offsetMinutes = steps[stepIndex];
 
-      // Sem passo neste índice → cadência esgotada (8 toques já feitos), encerra.
+      // Sem passo neste índice → cadência esgotada (todos os toques feitos), encerra.
+      // Também cobre o caso de o operador ter encurtado a cadência na tela com
+      // leads no meio do caminho: quem já passou do novo último passo é encerrado.
       if (offsetMinutes == null) {
         await this.leadsRepo.update(lead.id, { nextNurtureAt: null });
         continue;
@@ -398,7 +513,7 @@ export class SdrFollowupService {
         .execute();
       if (!claim.affected) continue;
 
-      const nextOffset = CADENCE_STEPS_MINUTES[stepIndex + 1];
+      const nextOffset = steps[stepIndex + 1];
       const nextNurtureAt = nextOffset != null ? new Date(Date.now() + nextOffset * 60_000) : null;
       await this.leadsRepo.update(lead.id, { nextNurtureAt });
 
@@ -418,7 +533,7 @@ export class SdrFollowupService {
 
       await this.sendFollowup(lead, message);
       sent++;
-      this.logger.log(`[CADENCE] Toque ${stepIndex + 1}/${CADENCE_STEPS_MINUTES.length} → ${lead.phone} (lead ${lead.id})`);
+      this.logger.log(`[CADENCE] Toque ${stepIndex + 1}/${steps.length} → ${lead.phone} (lead ${lead.id})`);
     }
   }
 

@@ -1045,6 +1045,291 @@ function FollowupRules() {
   )
 }
 
+// ─── Cadência de follow-up (múltiplos toques) ─────────────────────────
+
+// Minutos → {value, unit} na maior unidade exata (1440 vira "1 dia", não "1440min").
+function minutesToParts(min) {
+  if (min % 1440 === 0) return { value: min / 1440, unit: 'd' }
+  if (min % 60 === 0) return { value: min / 60, unit: 'h' }
+  return { value: min, unit: 'm' }
+}
+
+function partsToMinutes(value, unit) {
+  const n = Math.max(1, Math.floor(Number(value) || 1))
+  return unit === 'd' ? n * 1440 : unit === 'h' ? n * 60 : n
+}
+
+// Tempo acumulado desde a última resposta do lead até o toque N.
+function fmtCumulative(min) {
+  if (min < 60) return `${min}min`
+  if (min < 1440) {
+    const h = Math.floor(min / 60)
+    const m = min % 60
+    return m ? `${h}h${String(m).padStart(2, '0')}` : `${h}h`
+  }
+  const d = Math.floor(min / 1440)
+  const h = Math.round((min % 1440) / 60)
+  return h ? `${d}d ${h}h` : `${d}d`
+}
+
+const CADENCE_DAY_GROUPS = [
+  { key: 'weekday', label: 'Segunda a sexta' },
+  { key: 'saturday', label: 'Sábado' },
+  { key: 'sunday', label: 'Domingo' },
+]
+
+// Cadência de N dias: toque 1 aos 30min, toque 2 +2h, depois 1 toque/dia.
+// buildDailyCadence(7) reproduz exatamente o padrão que estava no código.
+function buildDailyCadence(days) {
+  return [30, 120, ...Array(Math.max(0, days - 1)).fill(1440)]
+}
+
+const CADENCE_PRESETS = [3, 7, 14].map(days => ({ label: `${days} dias`, days, steps: buildDailyCadence(days) }))
+
+function CadenceConfig() {
+  const [config, setConfig] = useState(null)
+  const [defaults, setDefaults] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    fetch(`${API}/followup/cadence`)
+      .then(r => r.json())
+      .then(data => {
+        setConfig({ enabled: data.enabled, steps: data.steps, windows: data.windows })
+        setDefaults(data.defaults)
+      })
+      .catch(() => setError('Não foi possível carregar a cadência.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const patch = (changes) => { setConfig(c => ({ ...c, ...changes })); setSaved(false); setError('') }
+
+  const setStep = (i, minutes) => patch({ steps: config.steps.map((s, idx) => (idx === i ? minutes : s)) })
+  const removeStep = (i) => patch({ steps: config.steps.filter((_, idx) => idx !== i) })
+  const addStep = () => patch({ steps: [...config.steps, 1440] })
+
+  const setWindow = (dayKey, i, field, value) => {
+    const v = Math.min(24, Math.max(0, Math.floor(Number(value) || 0)))
+    patch({
+      windows: {
+        ...config.windows,
+        [dayKey]: config.windows[dayKey].map((w, idx) => (idx === i ? { ...w, [field]: v } : w)),
+      },
+    })
+  }
+  const addWindow = (dayKey) => patch({
+    windows: { ...config.windows, [dayKey]: [...config.windows[dayKey], { start: 9, end: 12 }] },
+  })
+  const removeWindow = (dayKey, i) => patch({
+    windows: { ...config.windows, [dayKey]: config.windows[dayKey].filter((_, idx) => idx !== i) },
+  })
+
+  const save = async () => {
+    setSaving(true); setError(''); setSaved(false)
+    try {
+      const res = await fetch(`${API}/followup/cadence`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.message || 'Erro ao salvar')
+      setConfig({ enabled: data.enabled, steps: data.steps, windows: data.windows })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err) {
+      setError(err.message || 'Erro ao salvar a cadência.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex items-center gap-2 text-slate-400">
+      <Loader2 className="w-4 h-4 animate-spin" /> Carregando cadência...
+    </div>
+  )
+  if (!config) return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 text-xs text-red-600">{error}</div>
+  )
+
+  // Acumulado até cada toque, pra mostrar "quando" cada um cai.
+  let running = 0
+  const timeline = config.steps.map((min) => { running += min; return running })
+  const totalDays = running / 1440
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Timer className="w-4 h-4 text-violet-600" />
+          <p className="font-semibold text-slate-800 text-sm">Cadência de Follow-up</p>
+        </div>
+        <button onClick={() => patch({ enabled: !config.enabled })} className="flex items-center gap-1.5">
+          <span className={`text-xs font-medium ${config.enabled ? 'text-violet-600' : 'text-slate-400'}`}>
+            {config.enabled ? 'Ativa' : 'Desativada'}
+          </span>
+          {config.enabled
+            ? <ToggleRight className="w-7 h-7 text-violet-600" />
+            : <ToggleLeft className="w-7 h-7 text-slate-300" />}
+        </button>
+      </div>
+      <p className="text-xs text-slate-400 mb-4">
+        Sequência de toques que a Clara manda pra quem parou de responder. O relógio reinicia toda vez
+        que o lead responde, e a cadência encerra sozinha se ele agendar ou pedir pra parar.
+      </p>
+
+      {/* Presets */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Modelos</span>
+        {CADENCE_PRESETS.map(preset => {
+          const isActive = JSON.stringify(preset.steps) === JSON.stringify(config.steps)
+          return (
+            <button
+              key={preset.label}
+              onClick={() => patch({ steps: preset.steps })}
+              className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition ${
+                isActive
+                  ? 'bg-violet-50 border-violet-300 text-violet-700'
+                  : 'border-slate-200 text-slate-500 hover:border-violet-300 hover:text-violet-600'
+              }`}
+            >
+              {preset.label}
+            </button>
+          )
+        })}
+        <span className="text-[11px] text-slate-400">
+          {config.steps.length} toque{config.steps.length > 1 ? 's' : ''} · termina em ~{totalDays < 1 ? '<1' : Math.round(totalDays)} dia{totalDays >= 2 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Passos */}
+      <div className="space-y-1.5 mb-2">
+        {config.steps.map((min, i) => {
+          const { value, unit } = minutesToParts(min)
+          return (
+            <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+              <span className="w-6 h-6 shrink-0 rounded-full bg-violet-100 text-violet-700 text-[11px] font-bold flex items-center justify-center">
+                {i + 1}
+              </span>
+              <span className="text-xs text-slate-500 shrink-0">{i === 0 ? 'após parar de responder' : 'depois do anterior'}</span>
+              <input
+                type="number"
+                min="1"
+                value={value}
+                onChange={e => setStep(i, partsToMinutes(e.target.value, unit))}
+                className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-400"
+              />
+              <select
+                value={unit}
+                onChange={e => setStep(i, partsToMinutes(value, e.target.value))}
+                className="border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-400"
+              >
+                <option value="m">min</option>
+                <option value="h">horas</option>
+                <option value="d">dias</option>
+              </select>
+              <span className="text-[11px] text-slate-400 ml-auto">cai em {fmtCumulative(timeline[i])}</span>
+              {config.steps.length > 1 && (
+                <button
+                  onClick={() => removeStep(i)}
+                  className="text-slate-300 hover:text-red-500 transition shrink-0"
+                  title="Remover toque"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <button
+        onClick={addStep}
+        className="flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-700 transition mb-5"
+      >
+        <Plus className="w-3.5 h-3.5" /> Adicionar toque
+      </button>
+
+      {/* Janelas de horário */}
+      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Janelas de envio (horário de Brasília)</p>
+      <p className="text-[11px] text-slate-400 mb-3">
+        Toques só saem dentro destas faixas. Se vencer fora da janela, espera a próxima — nunca some.
+        Isso não afeta a conversa ao vivo, só o envio automático.
+      </p>
+      <div className="space-y-2 mb-5">
+        {CADENCE_DAY_GROUPS.map(({ key, label }) => (
+          <div key={key} className="flex items-start gap-3 bg-slate-50 rounded-lg px-3 py-2">
+            <span className="text-xs font-medium text-slate-600 w-32 shrink-0 pt-1">{label}</span>
+            <div className="flex-1 flex flex-wrap items-center gap-2">
+              {config.windows[key].length === 0 && (
+                <span className="text-[11px] text-slate-400 pt-1">Sem envio neste dia</span>
+              )}
+              {config.windows[key].map((w, i) => (
+                <div key={i} className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                  <input
+                    type="number" min="0" max="24" value={w.start}
+                    onChange={e => setWindow(key, i, 'start', e.target.value)}
+                    className="w-10 text-xs text-center focus:outline-none"
+                  />
+                  <span className="text-[11px] text-slate-400">até</span>
+                  <input
+                    type="number" min="0" max="24" value={w.end}
+                    onChange={e => setWindow(key, i, 'end', e.target.value)}
+                    className="w-10 text-xs text-center focus:outline-none"
+                  />
+                  <span className="text-[11px] text-slate-400">h</span>
+                  <button onClick={() => removeWindow(key, i)} className="text-slate-300 hover:text-red-500 transition ml-0.5">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => addWindow(key)}
+                className="text-[11px] font-medium text-violet-600 hover:text-violet-700 transition flex items-center gap-1 pt-1"
+              >
+                <Plus className="w-3 h-3" /> faixa
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {error && (
+        <div className="mb-3 flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+          <XCircle className="w-3.5 h-3.5" /> {error}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-medium px-4 py-2 rounded-lg transition"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          {saving ? 'Salvando...' : 'Salvar cadência'}
+        </button>
+        {defaults && (
+          <button
+            onClick={() => patch({ steps: defaults.steps, windows: defaults.windows })}
+            className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> Restaurar padrão
+          </button>
+        )}
+        {saved && (
+          <span className="flex items-center gap-1 text-xs text-emerald-600">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Salvo
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Helpers de tempo (timestamps vêm em UTC, JS converte pro fuso local)
 function timeAgo(date, now) {
   if (!date) return '—'
@@ -2013,6 +2298,8 @@ export default function Settings() {
       <AvailabilityCalendar />
 
       <FollowupRules />
+
+      <CadenceConfig />
 
       <FollowupStatus />
 
