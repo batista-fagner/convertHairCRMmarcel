@@ -124,7 +124,7 @@ function CardContent({ lead, overlay = false }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-1">
             <p className="font-semibold text-slate-800 text-sm truncate">{lead.name}</p>
-            <span className="text-[10px] text-slate-400 shrink-0">{timeAgo(lead.waLastMessageAt || lead.updatedAt)}</span>
+            <span className="text-[10px] text-slate-400 shrink-0">{timeAgo(lead.waLastMessageAt || lead.createdAt)}</span>
           </div>
           {formatPhone(lead.phone) && (
             <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
@@ -204,7 +204,7 @@ function LeadCard({ lead, onOpen, onEdit, onDelete }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             <p className="font-semibold text-slate-800 text-sm truncate flex-1">{lead.name}</p>
-            <span className="text-[10px] text-slate-400 shrink-0">{timeAgo(lead.waLastMessageAt || lead.updatedAt)}</span>
+            <span className="text-[10px] text-slate-400 shrink-0">{timeAgo(lead.waLastMessageAt || lead.createdAt)}</span>
             {/* Menu fixo ao lado do timestamp */}
             <div className="relative shrink-0" onPointerDown={stop} onClick={stop}>
               <button
@@ -682,7 +682,7 @@ function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes
 
           <p className="text-[10px] text-slate-400 mt-1.5 text-center">
             Estágio: <span className="font-medium text-slate-500">{lead.waStage || '—'}</span>
-            {' · '}Última msg {timeAgo(lead.waLastMessageAt || lead.updatedAt)}
+            {' · '}Última msg {timeAgo(lead.waLastMessageAt || lead.createdAt)}
           </p>
         </div>
       </div>
@@ -938,6 +938,23 @@ export default function KanbanLeads() {
     if (selectedRef.current?.id === id) setSelected(null)
   }, [])
 
+  // Handler do socket 'lead:updated'. Só reposiciona (topo da coluna) quando o
+  // lead REALMENTE mudou de raia ou ainda não está no board. Antes chamava
+  // placeLead sempre, então qualquer update — inclusive o fetch-avatar disparado
+  // só de abrir a conversa — jogava o card pro topo da própria raia, fazendo o
+  // card "fugir" do lugar debaixo do cursor.
+  const applyLeadUpdate = useCallback((lead) => {
+    const currentStage = Object.keys(boardRef.current).find((stage) =>
+      boardRef.current[stage].some((l) => l.id === lead.id),
+    )
+    const targetStage = lead.kanbanStage && boardRef.current[lead.kanbanStage] ? lead.kanbanStage : 'novo'
+    if (currentStage && currentStage === targetStage) {
+      updateLeadInPlace(lead)
+    } else {
+      placeLead(lead)
+    }
+  }, [placeLead, updateLeadInPlace])
+
   const saveName = useCallback(async (lead, name) => {
     updateLeadInPlace({ id: lead.id, name }) // otimista
     try {
@@ -1062,11 +1079,11 @@ export default function KanbanLeads() {
     // no momento — sem isso, um lead de outra campanha "vazaria" pro board
     // filtrado assim que respondesse algo no WhatsApp.
     socket.on('lead:created', (lead) => { if (matchesCampaignFilter(lead, campaignFilterRef.current)) placeLead(lead) })
-    socket.on('lead:updated', (lead) => { if (matchesCampaignFilter(lead, campaignFilterRef.current)) placeLead(lead) })
+    socket.on('lead:updated', (lead) => { if (matchesCampaignFilter(lead, campaignFilterRef.current)) applyLeadUpdate(lead) })
     socket.on('lead:handoff', (lead) => { if (matchesCampaignFilter(lead, campaignFilterRef.current)) placeLead(lead, true) })
     socket.on('lead:deleted', ({ id }) => removeLead(id))
     return () => socket.disconnect()
-  }, [placeLead, removeLead, matchesCampaignFilter])
+  }, [placeLead, applyLeadUpdate, removeLead, matchesCampaignFilter])
 
   const handleDragStart = (event) => setActiveId(event.active.id)
 
