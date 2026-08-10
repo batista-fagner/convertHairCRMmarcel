@@ -8,6 +8,7 @@ import { WhatsappInstanceController } from './whatsapp-instance.controller';
 import { SdrService } from './sdr.service';
 import { SdrFollowupService } from './sdr-followup.service';
 import { FollowupVideoService } from './followup-video.service';
+import { SdrWebhookGuardService } from './sdr-webhook-guard.service';
 import { Lead } from '../common/entities/lead.entity';
 import { FollowupRule } from '../common/entities/followup-rule.entity';
 import { FollowupVideo } from '../common/entities/followup-video.entity';
@@ -31,6 +32,6 @@ import { AppointmentsModule } from '../appointments/appointments.module';
     AppointmentsModule,
   ],
   controllers: [SdrController, FollowupController, ManualMessageController, WhatsappInstanceController],
-  providers: [SdrService, SdrFollowupService, FollowupVideoService],
+  providers: [SdrService, SdrFollowupService, FollowupVideoService, SdrWebhookGuardService],
 })
 export class SdrModule {}
