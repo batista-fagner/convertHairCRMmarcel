@@ -17,6 +17,7 @@ import { SmsMessage } from './sms/entities/sms-message.entity';
 import { IgPost } from './ig-posts/ig-post.entity';
 import { Appointment } from './common/entities/appointment.entity';
 import { AvailabilityRule } from './common/entities/availability-rule.entity';
+import { BulkCampaign } from './common/entities/bulk-campaign.entity';
 import { LeadsModule } from './leads/leads.module';
 import { EnrichmentModule } from './enrichment/enrichment.module';
 import { FormsModule } from './forms/forms.module';
@@ -31,6 +32,7 @@ import { SmsModule } from './sms/sms.module';
 import { IgPostsModule } from './ig-posts/ig-posts.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { AvailabilityModule } from './availability/availability.module';
+import { BulkMessageModule } from './bulk-message/bulk-message.module';
 
 @Module({
   imports: [
@@ -47,7 +49,7 @@ import { AvailabilityModule } from './availability/availability.module';
         // Supabase exige SSL; `DATABASE_SSL=false` permite apontar para um
         // Postgres local descartável ao testar sem tocar em produção.
         ssl: config.get('DATABASE_SSL') === 'false' ? false : { rejectUnauthorized: false },
-        entities: [Lead, Campaign, Form, InstagramAutomation, IgConversation, IgMessage, IgCommentEvent, Setting, FollowupRule, FollowupVideo, SmsContact, SmsMessage, IgPost, Appointment, AvailabilityRule],
+        entities: [Lead, Campaign, Form, InstagramAutomation, IgConversation, IgMessage, IgCommentEvent, Setting, FollowupRule, FollowupVideo, SmsContact, SmsMessage, IgPost, Appointment, AvailabilityRule, BulkCampaign],
         synchronize: true,
         logging: false,
         timezone: 'Z',
@@ -67,6 +69,7 @@ import { AvailabilityModule } from './availability/availability.module';
     IgPostsModule,
     AppointmentsModule,
     AvailabilityModule,
+    BulkMessageModule,
   ],
 })
 export class AppModule {}

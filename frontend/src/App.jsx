@@ -16,6 +16,7 @@ import Videos from './pages/Videos'
 import InstagramPosts from './pages/InstagramPosts'
 import KanbanLeads from './pages/KanbanLeads'
 import CalendarPage from './pages/CalendarPage'
+import BulkMessage from './pages/BulkMessage'
 import SmsInbox from './pages/sms/SmsInbox'
 import IgInbox from './pages/instagram-inbox/IgInbox'
 import Login from './pages/Login'
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/leads" element={<Leads />} />
           <Route path="/kanban" element={<KanbanLeads />} />
           <Route path="/agenda" element={<CalendarPage />} />
+          <Route path="/bulk-message" element={<BulkMessage />} />
           <Route path="/forms" element={<Forms />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/email-sequences" element={<EmailSequences />} />

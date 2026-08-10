@@ -23,6 +23,7 @@ import {
   MessageSquare,
   Camera,
   Calendar,
+  Send,
 } from 'lucide-react'
 
 const NAV_GROUPS = [
@@ -46,6 +47,7 @@ const NAV_GROUPS = [
   {
     label: 'Automação',
     items: [
+      { icon: Send, label: 'Disparo em Massa', path: '/bulk-message' },
       { icon: Mail, label: 'Email Sequences', path: '/email-sequences', disabled: true },
       { icon: MessageCircle, label: 'WhatsApp', path: '/whatsapp', disabled: true },
     ],
@@ -97,6 +99,7 @@ const PAGE_TITLES = {
   '/instagram-posts': 'Posts no Instagram',
   '/kanban': 'Kanban de Leads',
   '/agenda': 'Agenda',
+  '/bulk-message': 'Disparo em Massa',
   '/settings': 'Configurações',
 }
 
