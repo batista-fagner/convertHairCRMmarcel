@@ -583,23 +583,24 @@ export default function Leads() {
           {/* Título + Filtros */}
           <div className="shrink-0">
             <div className="flex items-center justify-between gap-3">
-              <h1 className="text-2xl font-bold text-slate-900">
-                Todos os Leads <span className="text-base font-normal text-slate-400 ml-2">{total}</span>
+              <h1 className="text-xl font-bold text-slate-900 whitespace-nowrap">
+                Todos os Leads <span className="text-sm font-normal text-slate-400 ml-1">{total}</span>
               </h1>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   onClick={() => importFileRef.current?.click()}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition shadow"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 transition"
                 >
-                  <Upload className="w-4 h-4" /> Importar
+                  <Upload className="w-3.5 h-3.5" /> Importar CSV
                 </button>
                 <input ref={importFileRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={handleImportFile} />
                 <button
                   onClick={() => { setPage(1); fetchLeads(1) }}
                   disabled={loading}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition disabled:opacity-50"
+                  title="Atualizar"
+                  className="p-2 rounded-lg bg-white text-slate-500 border border-slate-200 hover:bg-slate-100 hover:text-slate-700 transition disabled:opacity-50"
                 >
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 </button>
               </div>
             </div>
@@ -621,7 +622,7 @@ export default function Leads() {
                 </button>
               )}
             </div>
-            <div className="flex gap-2 mt-3">
+            <div className="flex flex-wrap gap-1.5 mt-3">
               {[
                 { id: 'all', label: 'Todos' },
                 { id: 'ig_dm', label: 'Instagram DM' },
@@ -631,7 +632,7 @@ export default function Leads() {
                 <button
                   key={f.id}
                   onClick={() => { setSource(f.id); setPage(1) }}
-                  className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                  className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
                     source === f.id
                       ? 'bg-violet-600 text-white shadow'
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
