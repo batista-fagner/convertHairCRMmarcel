@@ -99,6 +99,12 @@ export class SdrController {
   // da conta.
   private static readonly NEVER_STARTED_STAGGER_MS = 40_000;
 
+  // Depois de N falhas seguidas (uazapi não confirmou o envio — ex.: número sem
+  // WhatsApp), o cron para de tentar esse lead pra sempre (ver caso Valdirene,
+  // 09/08: mesmo número tentado a cada minuto por 3h+ sem sucesso). O operador
+  // pode disparar manualmente via /sdr/trigger-opening se corrigir o número.
+  private static readonly NEVER_STARTED_MAX_ATTEMPTS = 3;
+
   constructor(
     private readonly sdrService: SdrService,
     private readonly leadsService: LeadsService,
@@ -130,14 +136,27 @@ export class SdrController {
     this.checkingNeverStarted = true;
     try {
       const cutoff = new Date(Date.now() - SdrController.NEVER_STARTED_WAIT_MINUTES * 60 * 1000);
-      const leads = await this.leadsService.findNeverStartedOlderThan(cutoff, SdrController.NEVER_STARTED_FEATURE_LAUNCH_AT);
+      const leads = await this.leadsService.findNeverStartedOlderThan(
+        cutoff,
+        SdrController.NEVER_STARTED_FEATURE_LAUNCH_AT,
+        SdrController.NEVER_STARTED_MAX_ATTEMPTS,
+      );
       let sent = 0;
       for (const lead of leads) {
         if (sent > 0) {
           await new Promise((r) => setTimeout(r, SdrController.NEVER_STARTED_STAGGER_MS));
         }
         const ok = await this.sendProactiveOpening(lead);
-        if (ok) sent++;
+        if (ok) {
+          sent++;
+          continue;
+        }
+
+        const attempts = (lead.openingAttempts ?? 0) + 1;
+        await this.leadsService.update(lead.id, { openingAttempts: attempts });
+        if (attempts >= SdrController.NEVER_STARTED_MAX_ATTEMPTS) {
+          this.logger.warn(`[SDR] Abertura proativa desistiu de ${lead.phone} após ${attempts} falhas seguidas — não tenta mais automaticamente`);
+        }
       }
       if (leads.length) {
         this.logger.log(`[SDR] Abertura proativa automática: ${sent}/${leads.length} enviada(s)`);

@@ -198,6 +198,15 @@ export class Lead {
   @Column({ name: 'wa_last_message_at', type: 'timestamp', nullable: true })
   waLastMessageAt?: Date;
 
+  // Quantas vezes a abertura proativa automática (checkNeverStartedLeads) falhou
+  // em sequência pra esse lead (uazapi não confirmou o envio). Ao atingir
+  // MAX_OPENING_ATTEMPTS, o cron para de tentar (ver sdr.controller.ts) — evita
+  // ficar batendo no uazapi pra sempre num número que nunca vai entregar
+  // (ex.: número sem WhatsApp/fixo). Zera se o lead responder por conta própria
+  // antes disso (nesse caso ele já sai da query por wa_last_message_at).
+  @Column({ name: 'opening_attempts', type: 'int', default: 0 })
+  openingAttempts: number;
+
   @Column({ name: 'kanban_stage', type: 'varchar', default: 'novo' })
   kanbanStage: KanbanStage;
 

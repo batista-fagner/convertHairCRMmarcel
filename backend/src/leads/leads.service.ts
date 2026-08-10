@@ -38,7 +38,7 @@ export class LeadsService {
    * abertura proativa (ver checkNeverStartedLeads em sdr.controller.ts).
    * ai_paused=false exclui quem foi pausado manualmente (ex.: lead de teste).
    */
-  async findNeverStartedOlderThan(cutoff: Date, createdAfter?: Date): Promise<Lead[]> {
+  async findNeverStartedOlderThan(cutoff: Date, createdAfter?: Date, maxOpeningAttempts?: number): Promise<Lead[]> {
     const query = this.leadsRepo
       .createQueryBuilder('lead')
       .where('lead.agent_mode = :mode', { mode: 'sdr' })
@@ -47,6 +47,7 @@ export class LeadsService {
       .andWhere('(lead.ai_context IS NULL OR jsonb_array_length(lead.ai_context) = 0)')
       .andWhere('lead.created_at <= :cutoff', { cutoff });
     if (createdAfter) query.andWhere('lead.created_at >= :createdAfter', { createdAfter });
+    if (maxOpeningAttempts != null) query.andWhere('lead.opening_attempts < :maxOpeningAttempts', { maxOpeningAttempts });
     return query.getMany();
   }
 
