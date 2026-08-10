@@ -105,6 +105,12 @@ export class SdrController {
   // pode disparar manualmente via /sdr/trigger-opening se corrigir o número.
   private static readonly NEVER_STARTED_MAX_ATTEMPTS = 3;
 
+  // Texto gravado em notes quando o cron desiste — dá pro operador ver a causa
+  // provável direto no card, sem precisar olhar log do Railway. O frontend
+  // (KanbanLeads.jsx) casa por essa frase pra mostrar um badge de alerta no card.
+  private static readonly OPENING_FAILED_NOTE =
+    '⚠️ Abertura automática falhou 3x (WhatsApp não confirmou o envio) — provável número errado ou sem WhatsApp. Envio automático interrompido, use "Disparar abertura" manualmente depois de corrigir.';
+
   constructor(
     private readonly sdrService: SdrService,
     private readonly leadsService: LeadsService,
@@ -153,10 +159,16 @@ export class SdrController {
         }
 
         const attempts = (lead.openingAttempts ?? 0) + 1;
-        await this.leadsService.update(lead.id, { openingAttempts: attempts });
+        const updates: Partial<Lead> = { openingAttempts: attempts };
         if (attempts >= SdrController.NEVER_STARTED_MAX_ATTEMPTS) {
+          const note = SdrController.OPENING_FAILED_NOTE;
+          if (!lead.notes || !lead.notes.includes(note)) {
+            updates.notes = lead.notes ? `${note}\n\n${lead.notes}` : note;
+          }
           this.logger.warn(`[SDR] Abertura proativa desistiu de ${lead.phone} após ${attempts} falhas seguidas — não tenta mais automaticamente`);
         }
+        const updated = await this.leadsService.update(lead.id, updates);
+        if (updates.notes) this.realtime.emitLeadUpdated(updated);
       }
       if (leads.length) {
         this.logger.log(`[SDR] Abertura proativa automática: ${sent}/${leads.length} enviada(s)`);

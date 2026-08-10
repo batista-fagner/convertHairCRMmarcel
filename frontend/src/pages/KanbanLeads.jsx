@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { io } from 'socket.io-client'
-import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, MessageCircle, PauseCircle, Bot, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Paperclip, Send, FileText, Video, StickyNote, ChevronDown, ChevronUp, Plus, CheckCircle2, Megaphone, Search, Layers, CalendarCheck } from 'lucide-react'
+import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, MessageCircle, PauseCircle, Bot, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Paperclip, Send, FileText, Video, StickyNote, ChevronDown, ChevronUp, Plus, CheckCircle2, Megaphone, Search, Layers, CalendarCheck, AlertTriangle } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 const SOCKET_URL = API.replace(/\/api\/?$/, '') || 'http://localhost:3002'
@@ -103,6 +103,12 @@ const TEMP_BADGE = {
   frio:   { label: '❄️ Frio',   className: 'bg-cyan-100 text-cyan-700' },
 }
 
+// Casa com a observação que o backend grava em notes quando a abertura
+// automática desiste após 3 falhas (ver OPENING_FAILED_NOTE em sdr.controller.ts).
+function hasOpeningFailedNote(lead) {
+  return typeof lead.notes === 'string' && lead.notes.includes('Abertura automática falhou')
+}
+
 // Visual puro do card (reusado no card e no DragOverlay)
 function CardContent({ lead, overlay = false }) {
   const msg = lastMessage(lead)
@@ -163,6 +169,14 @@ function CardContent({ lead, overlay = false }) {
             title={`Follow-up enviado em ${new Date(lead.followupSentAt).toLocaleString('pt-BR')}`}
           >
             <Send className="w-3 h-3" /> Follow-up enviado
+          </span>
+        )}
+        {hasOpeningFailedNote(lead) && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex items-center gap-0.5"
+            title={lead.notes}
+          >
+            <AlertTriangle className="w-3 h-3" /> Falha no envio
           </span>
         )}
       </div>
@@ -264,6 +278,14 @@ function LeadCard({ lead, onOpen, onEdit, onDelete }) {
             title={`Follow-up enviado em ${new Date(lead.followupSentAt).toLocaleString('pt-BR')}`}
           >
             <Send className="w-3 h-3" /> Follow-up enviado
+          </span>
+        )}
+        {hasOpeningFailedNote(lead) && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex items-center gap-0.5"
+            title={lead.notes}
+          >
+            <AlertTriangle className="w-3 h-3" /> Falha no envio
           </span>
         )}
       </div>
