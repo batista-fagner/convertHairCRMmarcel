@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Users, MessageCircle, Copy, CheckCircle2, Megaphone, X, Loader2,
   ExternalLink, Clock, MoreVertical, Send, Pencil, ChevronDown,
   FileText, TrendingUp, User, ArrowDown, Trash2, MessageSquare, RefreshCw, Search,
-  Layers, MapPin, Globe,
+  Layers, MapPin, Globe, Upload, AlertTriangle, Download,
 } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
@@ -49,9 +49,38 @@ function timeAgo(date) {
 function formatPhone(phone) {
   if (!phone || phone.startsWith('ig_')) return null
   const d = phone.replace(/\D/g, '')
+  // Número dos EUA com DDI (padrão da base do Marcel): 1 + área(3) + 7 dígitos.
+  // Sem esse caso, "18042003936" caía no formato BR e virava "(18) 04200-3936".
+  if (d.length === 11 && d.startsWith('1')) return `+1 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`
   if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
   if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
   return phone
+}
+
+/**
+ * Parseia o CSV de importação (formato: Nome,Telefone — uma linha por lead).
+ * Divide pela ÚLTIMA vírgula da linha, então nome com vírgula não quebra.
+ * Cabeçalho e linhas sem dígitos no telefone são descartados aqui mesmo.
+ */
+function parseLeadsCsv(text) {
+  const rows = []
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const idx = line.lastIndexOf(',')
+    if (idx === -1) continue
+    const name = line.slice(0, idx).replace(/^"|"$/g, '').trim()
+    const phone = line.slice(idx + 1).replace(/^"|"$/g, '').trim()
+    if (!phone.replace(/\D/g, '')) continue
+    rows.push({ name, phone })
+  }
+  return rows
+}
+
+// Mesma normalização do backend: só dígitos; 10 dígitos = número US sem DDI → prefixa 1.
+function normalizeUsPhone(phone) {
+  const d = (phone || '').replace(/\D/g, '')
+  return d.length === 10 ? `1${d}` : d
 }
 
 const GHL_LABELS = {
@@ -82,6 +111,7 @@ function ghlEntries(obj) {
 }
 
 function getLeadOrigin(lead) {
+  if (lead.importedAt) return 'Importado'
   if (lead.utmSource === 'instagram' && lead.utmMedium === 'dm-automation') return 'Instagram DM'
   if (lead.fbclid || ['facebook', 'meta', 'facebookads', 'leadscomia'].includes(lead.utmSource)) return 'Tráfego Pago'
   if (lead.ghlContext) return 'Página de Captura'
@@ -117,6 +147,9 @@ export default function Leads() {
   const [deleting, setDeleting] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [ghlDrawerOpen, setGhlDrawerOpen] = useState(false)
+  // Importação de planilha: null | { rows } (prévia) | { rows, importing } | { result }
+  const [importState, setImportState] = useState(null)
+  const importFileRef = useRef(null)
 
   const DEMO_LEAD = {
     id: 'demo-lead-1',
@@ -151,11 +184,11 @@ export default function Leads() {
       if (append) {
         setLeads(prev => [...prev, ...newLeads])
       } else {
-        const showDemo = !search
+        const showDemo = !search && source === 'all'
         setLeads(showDemo ? [DEMO_LEAD, ...newLeads] : newLeads)
       }
       setTotalPages(data.totalPages || 1)
-      setTotal((data.total || 0) + (search ? 0 : 1))
+      setTotal((data.total || 0) + (!search && source === 'all' ? 1 : 0))
     } catch (err) {
       console.error(err)
     } finally {
@@ -284,6 +317,43 @@ export default function Leads() {
     }
   }
 
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // permite escolher o mesmo arquivo de novo depois
+    if (!file) return
+    try {
+      const text = await file.text()
+      const rows = parseLeadsCsv(text)
+      if (rows.length === 0) {
+        alert('Nenhum lead válido encontrado no arquivo (esperado: Nome,Telefone)')
+        return
+      }
+      setImportState({ rows })
+    } catch {
+      alert('Não foi possível ler o arquivo')
+    }
+  }
+
+  const confirmImport = async () => {
+    if (!importState?.rows?.length) return
+    setImportState(prev => ({ ...prev, importing: true }))
+    try {
+      const res = await fetch(`${API}/leads/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: importState.rows }),
+      })
+      if (!res.ok) throw new Error()
+      const result = await res.json()
+      setImportState({ result })
+      setPage(1)
+      fetchLeads(1)
+    } catch {
+      alert('Erro ao importar leads')
+      setImportState(prev => ({ ...prev, importing: false }))
+    }
+  }
+
   const openCreativeModal = async (adId) => {
     setCreativeModal({ adId, data: null, loading: true, error: null })
     try {
@@ -329,6 +399,113 @@ export default function Leads() {
                 {deleting ? 'Removendo...' : 'Remover'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de importação de leads (prévia + resultado) */}
+      {importState && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => !importState.importing && setImportState(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-violet-500 to-indigo-600 text-white shrink-0">
+              <div className="flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                <p className="font-bold">{importState.result ? 'Importação concluída' : 'Importar leads'}</p>
+              </div>
+              {!importState.importing && (
+                <button onClick={() => setImportState(null)} className="hover:opacity-70 transition">
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {importState.result ? (
+              <div className="p-6 overflow-y-auto">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+                    <p className="text-2xl font-bold text-emerald-700">{importState.result.imported}</p>
+                    <p className="text-xs text-emerald-600 mt-0.5">Importados</p>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                    <p className="text-2xl font-bold text-amber-700">{importState.result.duplicates?.length || 0}</p>
+                    <p className="text-xs text-amber-600 mt-0.5">Duplicados</p>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                    <p className="text-2xl font-bold text-slate-600">{importState.result.invalid}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Inválidos</p>
+                  </div>
+                </div>
+                {(importState.result.duplicates?.length || 0) > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold text-amber-700 flex items-center gap-1 mb-2">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Já existiam no CRM (mantidos como estavam, com aviso no cadastro):
+                    </p>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {importState.result.duplicates.map((d, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs bg-amber-50 rounded-lg px-3 py-1.5">
+                          <span className="font-medium text-slate-700">{d.name}</span>
+                          <span className="text-slate-500">{formatPhone(d.phone) || d.phone}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => setImportState(null)}
+                  className="mt-5 w-full py-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-sm font-bold text-white transition"
+                >
+                  Fechar
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="px-6 pt-4 pb-2 shrink-0">
+                  <p className="text-sm text-slate-600">
+                    <span className="font-bold text-slate-800">{importState.rows.length}</span> lead(s) encontrado(s) no arquivo. Confira antes de confirmar:
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Duplicados mantêm o cadastro atual (com aviso). Importados só aparecem no Kanban depois da primeira mensagem.
+                  </p>
+                </div>
+                <div className="flex-1 overflow-y-auto px-6 py-2">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wide border-b border-slate-100">
+                        <th className="py-2 pr-2">#</th>
+                        <th className="py-2 pr-2">Nome</th>
+                        <th className="py-2">Telefone</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {importState.rows.map((r, i) => (
+                        <tr key={i}>
+                          <td className="py-1.5 pr-2 text-slate-400 text-xs">{i + 1}</td>
+                          <td className="py-1.5 pr-2 font-medium text-slate-700">{r.name || <span className="text-slate-400 italic">sem nome</span>}</td>
+                          <td className="py-1.5 text-slate-500">{formatPhone(normalizeUsPhone(r.phone)) || r.phone}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
+                  <button
+                    onClick={() => setImportState(null)}
+                    disabled={importState.importing}
+                    className="flex-1 px-4 py-2.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={confirmImport}
+                    disabled={importState.importing}
+                    className="flex-1 px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-sm font-bold text-white transition disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {importState.importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {importState.importing ? 'Importando...' : `Importar ${importState.rows.length} lead(s)`}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -409,13 +586,22 @@ export default function Leads() {
               <h1 className="text-2xl font-bold text-slate-900">
                 Todos os Leads <span className="text-base font-normal text-slate-400 ml-2">{total}</span>
               </h1>
-              <button
-                onClick={() => { setPage(1); fetchLeads(1) }}
-                disabled={loading}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => importFileRef.current?.click()}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition shadow"
+                >
+                  <Upload className="w-4 h-4" /> Importar
+                </button>
+                <input ref={importFileRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={handleImportFile} />
+                <button
+                  onClick={() => { setPage(1); fetchLeads(1) }}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+                </button>
+              </div>
             </div>
             <div className="relative mt-3">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -440,6 +626,7 @@ export default function Leads() {
                 { id: 'all', label: 'Todos' },
                 { id: 'ig_dm', label: 'Instagram DM' },
                 { id: 'paid', label: 'Tráfego Pago' },
+                { id: 'imported', label: 'Importados' },
               ].map(f => (
                 <button
                   key={f.id}
@@ -492,6 +679,14 @@ export default function Leads() {
                             {lead.isMql && (
                               <span className="text-[11px] px-2 py-0.5 rounded whitespace-nowrap font-bold bg-emerald-100 text-emerald-700">
                                 🎯 MQL
+                              </span>
+                            )}
+                            {lead.importedAt && (
+                              <span
+                                className="text-[11px] px-2 py-0.5 rounded whitespace-nowrap font-medium bg-purple-100 text-purple-700 flex items-center gap-0.5"
+                                title={`Importado de planilha em ${formatDate(lead.importedAt)}`}
+                              >
+                                <Download className="w-3 h-3" /> Importado
                               </span>
                             )}
                             <span className={`text-[11px] px-2 py-0.5 rounded whitespace-nowrap font-medium ${sc.className}`}>

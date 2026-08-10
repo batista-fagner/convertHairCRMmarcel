@@ -40,6 +40,20 @@ export class LeadsController {
     return lead;
   }
 
+  // Importação de planilha (CSV parseado no frontend — chega como JSON).
+  // Duplicado mantém o lead existente e recebe aviso em notes; lead novo entra
+  // com importedAt (fora do Kanban e da abertura automática até ser contatado).
+  @Post('import')
+  async importLeads(@Body() body: { rows: { name?: string; phone?: string }[] }) {
+    if (!Array.isArray(body?.rows) || body.rows.length === 0) {
+      throw new HttpException('Nenhuma linha pra importar', HttpStatus.BAD_REQUEST);
+    }
+    if (body.rows.length > 5000) {
+      throw new HttpException('Máximo de 5000 linhas por importação', HttpStatus.BAD_REQUEST);
+    }
+    return this.leadsService.importLeads(body.rows);
+  }
+
   // Webhook do GoHighLevel (página de captura do Marcel) — payload livre,
   // aceita name/phone/email em variações de nome de campo que o GHL manda.
   @Post('ghl-capture')

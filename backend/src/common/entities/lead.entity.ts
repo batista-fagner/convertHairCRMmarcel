@@ -242,6 +242,13 @@ export class Lead {
   @Column({ name: 'nurture_paused', type: 'boolean', default: false })
   nurturePaused: boolean;
 
+  // Preenchido quando o lead entrou via importação de planilha (POST /leads/import)
+  // em vez do funil normal. Lead importado NÃO recebe abertura proativa automática
+  // (o disparo em massa é uma ação deliberada do operador, fase 2) e só aparece
+  // no Kanban depois da primeira mensagem trocada (ver findKanban).
+  @Column({ name: 'imported_at', type: 'timestamp', nullable: true })
+  importedAt?: Date | null;
+
   @Column({ name: 'notes', type: 'text', nullable: true })
   notes?: string | null;
 

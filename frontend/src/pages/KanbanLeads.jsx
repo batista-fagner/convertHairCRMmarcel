@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { io } from 'socket.io-client'
-import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, MessageCircle, PauseCircle, Bot, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Paperclip, Send, FileText, Video, StickyNote, ChevronDown, ChevronUp, Plus, CheckCircle2, Megaphone, Search, Layers, CalendarCheck, AlertTriangle } from 'lucide-react'
+import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, MessageCircle, PauseCircle, Bot, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Paperclip, Send, FileText, Video, StickyNote, ChevronDown, ChevronUp, Plus, CheckCircle2, Megaphone, Search, Layers, CalendarCheck, AlertTriangle, Download } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 const SOCKET_URL = API.replace(/\/api\/?$/, '') || 'http://localhost:3002'
@@ -83,6 +83,9 @@ function timeAgo(date) {
 function formatPhone(phone) {
   if (!phone) return null
   const d = phone.replace(/\D/g, '')
+  // Número dos EUA com DDI (padrão da base do Marcel): 1 + área(3) + 7 dígitos.
+  // Sem esse caso, "18042003936" caía no formato BR e virava "(18) 04200-3936".
+  if (d.length === 11 && d.startsWith('1')) return `+1 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`
   const local = d.startsWith('55') ? d.slice(2) : d
   if (local.length === 11) return `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`
   if (local.length === 10) return `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`
@@ -177,6 +180,14 @@ function CardContent({ lead, overlay = false }) {
             title={lead.notes}
           >
             <AlertTriangle className="w-3 h-3" /> Falha no envio
+          </span>
+        )}
+        {lead.importedAt && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium flex items-center gap-0.5"
+            title={`Lead importado de planilha em ${new Date(lead.importedAt).toLocaleDateString('pt-BR')}`}
+          >
+            <Download className="w-3 h-3" /> Importado
           </span>
         )}
       </div>
@@ -286,6 +297,14 @@ function LeadCard({ lead, onOpen, onEdit, onDelete }) {
             title={lead.notes}
           >
             <AlertTriangle className="w-3 h-3" /> Falha no envio
+          </span>
+        )}
+        {lead.importedAt && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium flex items-center gap-0.5"
+            title={`Lead importado de planilha em ${new Date(lead.importedAt).toLocaleDateString('pt-BR')}`}
+          >
+            <Download className="w-3 h-3" /> Importado
           </span>
         )}
       </div>

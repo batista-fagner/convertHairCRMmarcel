@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Lead, LeadClassification, KanbanStage } from '../common/entities/lead.entity';
 
 /** Valor de filtro usado pelo frontend pra pedir só os leads sem campanha atribuída (orgânicos). */
@@ -45,13 +45,17 @@ export class LeadsService {
       .andWhere('lead.ai_paused = false')
       .andWhere('lead.wa_last_message_at IS NULL')
       .andWhere('(lead.ai_context IS NULL OR jsonb_array_length(lead.ai_context) = 0)')
-      .andWhere('lead.created_at <= :cutoff', { cutoff });
+      .andWhere('lead.created_at <= :cutoff', { cutoff })
+      // Lead importado de planilha nunca recebe abertura automática — o disparo
+      // pra base importada é ação deliberada do operador (fase 2, em massa),
+      // senão a simples importação já sairia mandando mensagem pra lista toda.
+      .andWhere('lead.imported_at IS NULL');
     if (createdAfter) query.andWhere('lead.created_at >= :createdAfter', { createdAfter });
     if (maxOpeningAttempts != null) query.andWhere('lead.opening_attempts < :maxOpeningAttempts', { maxOpeningAttempts });
     return query.getMany();
   }
 
-  async findAll(opts?: { campaignId?: string; page?: number; limit?: number; source?: 'all' | 'ig_dm' | 'paid'; search?: string }): Promise<{ data: Lead[]; total: number; page: number; totalPages: number }> {
+  async findAll(opts?: { campaignId?: string; page?: number; limit?: number; source?: 'all' | 'ig_dm' | 'paid' | 'imported'; search?: string }): Promise<{ data: Lead[]; total: number; page: number; totalPages: number }> {
     const page = opts?.page || 1;
     const limit = opts?.limit || 6;
     const source = opts?.source || 'all';
@@ -66,6 +70,8 @@ export class LeadsService {
       query.andWhere('lead.utm_medium = :utmMedium', { utmMedium: 'dm-automation' });
     } else if (source === 'paid') {
       query.andWhere('(lead.fbclid IS NOT NULL OR lead.ctwa_clid IS NOT NULL OR lead.utm_source IN (:...sources))', { sources: ['facebook', 'leadscomia', 'ctwa'] });
+    } else if (source === 'imported') {
+      query.andWhere('lead.imported_at IS NOT NULL');
     }
 
     const search = opts?.search?.trim();
@@ -130,17 +136,20 @@ export class LeadsService {
   }
 
   async findKanban(campaign?: string): Promise<Record<KanbanStage, Lead[]>> {
-    const where: { agentMode: 'sdr'; utmCampaign?: any } = { agentMode: 'sdr' };
+    const query = this.leadsRepo
+      .createQueryBuilder('lead')
+      .where('lead.agent_mode = :mode', { mode: 'sdr' })
+      // Lead importado de planilha só entra no board depois da 1ª mensagem
+      // trocada — antes disso ele vive só na página de Leads (filtro
+      // "Importados"). Evita inundar a raia "Novo" com a base importada
+      // inteira antes de qualquer disparo acontecer.
+      .andWhere('(lead.imported_at IS NULL OR lead.wa_last_message_at IS NOT NULL)');
     if (campaign === ORPHAN_CAMPAIGN_FILTER) {
-      where.utmCampaign = IsNull();
+      query.andWhere('lead.utm_campaign IS NULL');
     } else if (campaign) {
-      where.utmCampaign = campaign;
+      query.andWhere('lead.utm_campaign = :campaign', { campaign });
     }
-    const leads = await this.leadsRepo.find({
-      where,
-      order: { updatedAt: 'DESC' },
-      take: 400,
-    });
+    const leads = await query.orderBy('lead.updated_at', 'DESC').take(400).getMany();
     const board: Record<KanbanStage, Lead[]> = { novo: [], atendimento: [], 'nao-qualificado': [], qualificado: [], agendado: [], vendeu: [] };
     for (const lead of leads) {
       const stage = (lead.kanbanStage as KanbanStage) || 'novo';
@@ -167,6 +176,72 @@ export class LeadsService {
       GROUP BY utm_campaign
       ORDER BY "lastLeadAt" DESC NULLS LAST
     `);
+  }
+
+  /**
+   * Importa leads de planilha (nome + telefone). Regras combinadas com o cliente:
+   * - Telefone normalizado pro padrão do banco (só dígitos, com DDI; 10 dígitos
+   *   = número dos EUA sem DDI → prefixa 1, igual aos leads do GHL).
+   * - Duplicado dentro do próprio arquivo: só a 1ª ocorrência importa.
+   * - Duplicado contra o banco: PERMANECE o lead que já existe (nada é
+   *   sobrescrito — pode ter conversa ativa) e ele recebe um aviso em notes.
+   * - Lead novo entra com importedAt preenchido → fora do Kanban e da abertura
+   *   automática até o disparo (fase 2) ou contato manual.
+   */
+  async importLeads(rows: { name?: string; phone?: string }[]): Promise<{
+    imported: number;
+    duplicates: { name: string; phone: string; existingName: string }[];
+    invalid: number;
+    total: number;
+  }> {
+    const seen = new Set<string>();
+    const duplicates: { name: string; phone: string; existingName: string }[] = [];
+    let imported = 0;
+    let invalid = 0;
+
+    for (const row of rows) {
+      const digits = String(row.phone || '').replace(/\D/g, '');
+      if (!digits || digits.length < 10) {
+        invalid++;
+        continue;
+      }
+      const phone = digits.length === 10 ? `1${digits}` : digits;
+      if (seen.has(phone)) continue; // repetido dentro do arquivo — 1ª ocorrência já tratada
+      seen.add(phone);
+
+      const name = String(row.name || '').trim() || `Lead ${phone.slice(-4)}`;
+
+      // Duplicado no banco: checa o número normalizado e a variante sem DDI 1
+      // (base antiga pode ter registrado sem o prefixo).
+      const existing =
+        (await this.findByPhone(phone)) ||
+        (phone.startsWith('1') ? await this.findByPhone(phone.slice(1)) : null);
+
+      if (existing) {
+        const warning = `⚠️ Duplicado na importação (${new Date().toLocaleDateString('pt-BR')}) — "${name}" já existia no CRM; os dados da planilha NÃO foram aplicados.`;
+        if (!existing.notes || !existing.notes.includes('Duplicado na importação')) {
+          await this.leadsRepo.update(existing.id, {
+            notes: existing.notes ? `${warning}\n\n${existing.notes}` : warning,
+          });
+        }
+        duplicates.push({ name, phone, existingName: existing.name });
+        continue;
+      }
+
+      await this.leadsRepo.save(this.leadsRepo.create({
+        name,
+        phone,
+        status: 'novo',
+        agentMode: 'sdr',
+        kanbanStage: 'novo',
+        utmSource: 'importacao',
+        importedAt: new Date(),
+      }));
+      imported++;
+    }
+
+    this.logger.log(`[Import] ${imported} lead(s) importado(s), ${duplicates.length} duplicado(s), ${invalid} inválido(s) de ${rows.length} linha(s)`);
+    return { imported, duplicates, invalid, total: rows.length };
   }
 
   async moveKanban(id: string, kanbanStage: KanbanStage): Promise<Lead> {
