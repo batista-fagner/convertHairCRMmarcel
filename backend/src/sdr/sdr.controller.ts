@@ -189,8 +189,8 @@ export class SdrController {
     const trimmed = (name || '').trim();
     const validName = trimmed && !/^Lead \d+$/i.test(trimmed) ? trimmed.split(' ')[0] : '';
     const greeting = validName
-      ? `🎉 Parabéns ${validName} por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!`
-      : '🎉 Parabéns por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!';
+      ? `Parabéns ${validName} por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!`
+      : 'Parabéns por ter se inscrito na sessão de mentoria gratuita com o mentor Marcel!';
     return `${greeting}|||Você já é dona do seu próprio schedule ou ainda trabalha como helper?`;
   }
 
@@ -627,7 +627,7 @@ export class SdrController {
         // não faz handoff — o lead continua a conversa e escolhe outro horário
         // no próximo turno, já vendo a tabela atualizada.
         this.logger.warn(`[SDR][AGENDA] Horário ${ai.appointmentDateTime} não está mais disponível para ${phone} — não agendado`);
-        ai.reply = 'Poxa, esse horário acabou de ser preenchido por outra pessoa! 😅 Me diz outro horário que funcione pra você que eu já vejo se ainda tá livre.';
+        ai.reply = 'Poxa, esse horário acabou de ser preenchido por outra pessoa! Me diz outro horário que funcione pra você que eu já vejo se ainda tá livre.';
       }
     }
 

@@ -672,7 +672,7 @@ export class SdrFollowupService {
 - Comece a mensagem com algo que quebre o gelo de forma empática (reconhecendo a correria, o sumiço, sem soar como cobrança) antes de ir pro conteúdo — nunca entre direto na pergunta fria.
 - Escreva como alguém mandando um zap de verdade pra um conhecido, não como um script de vendas. Sem "Olá! Tudo bem?" genérico, sem parecer disparo automático.
 - Trate por "vc", nunca "você" por extenso.
-- Pode usar 1 emoji no máximo, só se soar natural — nunca fileira de emoji.
+- SEM EMOJIS — nenhum, em nenhuma hipótese.
 - Curta (1-3 frases). Sem parágrafo, sem lista, sem "!" em excesso.
 - Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance") — o tom é de interesse genuíno na dor dela, não de cobrança.
 
@@ -768,7 +768,7 @@ TOM:
 - Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
 - PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
 - Trate por "vc", nunca "você" por extenso.
-- No máximo 1 emoji, só se soar natural.
+- SEM EMOJIS — nenhum, em nenhuma hipótese.
 - Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
 - Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
 
@@ -832,7 +832,7 @@ TOM:
 - Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
 - PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
 - Trate por "vc", nunca "você" por extenso.
-- No máximo 1 emoji, só se soar natural.
+- SEM EMOJIS — nenhum, em nenhuma hipótese.
 - Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
 - Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
 
