@@ -83,7 +83,12 @@ export class SdrWebhookGuardService implements OnModuleInit {
         `[WebhookGuard] Webhook da instância SDR está errado (url atual: ${current?.url || 'nenhum'}) — corrigindo para ${this.desiredUrl}`,
       );
 
+      // POST /webhook exige um `action` explícito ("update"/"add"/"delete") —
+      // sem isso responde 400 "Invalid action" mesmo com payload correto
+      // (descoberto testando direto contra a API, doc não deixa isso claro).
+      // Com id existente, "update" edita a entrada; sem id, "add" cria uma nova.
       const payload: Record<string, any> = {
+        action: current?.id ? 'update' : 'add',
         enabled: true,
         url: this.desiredUrl,
         events: SdrWebhookGuardService.EVENTS,
@@ -91,7 +96,6 @@ export class SdrWebhookGuardService implements OnModuleInit {
         addUrlEvents: false,
         addUrlTypesMessages: false,
       };
-      // Com id, a uazapi atualiza a entrada existente em vez de criar outra.
       if (current?.id) payload.id = current.id;
 
       await firstValueFrom(
