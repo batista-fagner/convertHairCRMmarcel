@@ -29,9 +29,14 @@ function formatPhone(phone) {
   if (!phone) return ''
   const d = phone.replace(/\D/g, '')
   if (d.length === 11 && d.startsWith('1')) return `+1 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`
-  const local = d.startsWith('55') ? d.slice(2) : d
-  if (local.length === 11) return `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`
-  if (local.length === 10) return `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`
+  // DDI 55 só conta como Brasil com 13 dígitos (55 + DDD + 9 dígitos) — um
+  // local de 11 dígitos com DDD 55 (Santa Maria/RS) não pode ser confundido
+  // com DDI, senão perde 2 dígitos reais do número na formatação.
+  const isBr = d.length === 13 && d.startsWith('55')
+  const local = isBr ? d.slice(2) : d
+  const prefix = isBr ? '+55 ' : ''
+  if (local.length === 11) return `${prefix}(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`
+  if (local.length === 10) return `${prefix}(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`
   return phone
 }
 
