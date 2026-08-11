@@ -15,7 +15,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway';
 const IG_API = 'https://graph.instagram.com/v21.0';
 
 const DEFAULT_IG_AI_PROMPT = `Você é uma atendente simpática respondendo comentários e DMs no Instagram.
-Escreva como alguém mandando mensagem de verdade, curto, direto, no máximo 2-3 frases, com no máximo 1 emoji.
+Escreva como alguém mandando mensagem de verdade, curto, direto, no máximo 2-3 frases. SEM EMOJIS — nenhum, em nenhuma hipótese.
 Nunca invente informação sobre produto/preço que não foi te dada no contexto.`;
 
 // DM que chega sem vir de um comentário/automação rastreada (ex.: alguém vê o
@@ -29,7 +29,7 @@ export const IG_CATCHALL_BUTTON_KEY = 'ig_catchall_button_label';
 
 const DEFAULT_CATCHALL_PROMPT = `Você é uma atendente simpática da Convert Hair AI respondendo mensagens diretas no Instagram.
 Essas pessoas vieram de um anúncio (às vezes de um anúncio que leva pro WhatsApp, mas preferiram mandar DM direto aqui) dizendo que têm interesse na IA.
-Seja breve, humana, no máximo 2-3 frases por mensagem, no máximo 1 emoji.
+Seja breve, humana, no máximo 2-3 frases por mensagem. SEM EMOJIS — nenhum, em nenhuma hipótese.
 Se a mensagem da pessoa for só um cumprimento solto (oi, olá, boa tarde, opa, e aí etc.), sem contar nada ainda, NÃO se apresente nem dispare a pergunta de qualificação de cara — isso soa robótico. Responda o cumprimento de forma leve e natural, como alguém real responderia, e só avance pra entender o interesse dela na mensagem seguinte.
 Entenda rapidamente se a pessoa vende cabelo/mega hair/perucas, e quando fizer sentido, mande o link pra continuar a conversa.
 Nunca invente preço ou funcionalidade que não foi te dada no contexto.`;
@@ -344,7 +344,7 @@ export class InstagramAutomationService {
         // Instagram bloqueia com 403 mensagens proativas por user id pra quem
         // nunca abriu DM com a conta; resposta privada a um comentário é a
         // única forma permitida de iniciar a conversa a partir daqui.
-        const question = auto.confirmationQuestion || 'Quer receber o material gratuito? 👇';
+        const question = auto.confirmationQuestion || 'Quer receber o material gratuito?';
         await this.sendQuickReply(commentId, question);
 
         const conv = await this.upsertConversation(senderIgId, igUsername, auto.id, 'waiting_confirmation', {
@@ -357,7 +357,7 @@ export class InstagramAutomationService {
       } else if (auto.captureEmail && senderIgId) {
         // Pula confirmação, vai direto pedir email — mesmo motivo acima: 1ª
         // mensagem da conversa precisa ir via comment_id, não user id.
-        const question = auto.emailQuestion || 'Oi! Qual é o seu melhor email? 😊';
+        const question = auto.emailQuestion || 'Oi! Qual é o seu melhor email?';
         await this.sendDm(commentId, question);
 
         const conv = await this.upsertConversation(senderIgId, igUsername, auto.id, 'waiting_email', {
@@ -499,7 +499,7 @@ export class InstagramAutomationService {
 
       if (isYes) {
         if (auto?.captureEmail) {
-          const question = auto.emailQuestion || 'Ótimo! Qual é o seu melhor email? 😊';
+          const question = auto.emailQuestion || 'Ótimo! Qual é o seu melhor email?';
           await this.sendDmToUser(senderIgId, question);
           await this.recordMessage(conv.id, 'outbound', question, 'ai');
           await this.convRepo.update(conv.id, { step: 'waiting_email' });
@@ -512,7 +512,7 @@ export class InstagramAutomationService {
           await this.convRepo.update(conv.id, { step: 'completed' });
         }
       } else if (isNo) {
-        const bye = 'Tudo bem! Se mudar de ideia é só me chamar 😊';
+        const bye = 'Tudo bem! Se mudar de ideia é só me chamar';
         await this.sendDmToUser(senderIgId, bye);
         await this.recordMessage(conv.id, 'outbound', bye, 'ai');
         await this.convRepo.update(conv.id, { step: 'completed' });
@@ -526,7 +526,7 @@ export class InstagramAutomationService {
       await this.recordMessage(conv.id, 'inbound', text, 'contact');
 
       if (!this.isValidEmail(text)) {
-        const retry = 'Hmm, não parece um email válido 🤔 Pode me mandar novamente? Ex: nome@gmail.com';
+        const retry = 'Hmm, não parece um email válido. Pode me mandar novamente? Ex: nome@gmail.com';
         await this.sendDmToUser(senderIgId, retry);
         await this.recordMessage(conv.id, 'outbound', retry, 'ai');
         return;
@@ -540,7 +540,7 @@ export class InstagramAutomationService {
         await this.sendDmToUser(senderIgId, auto.replyMessage, auto.dmButtonLabel, auto.link);
         reply = auto.replyMessage;
       } else {
-        reply = 'Perfeito! Em breve você receberá mais informações 🙌';
+        reply = 'Perfeito! Em breve você receberá mais informações';
         await this.sendDmToUser(senderIgId, reply);
       }
       await this.recordMessage(conv.id, 'outbound', reply, 'ai');
@@ -819,7 +819,7 @@ export class InstagramAutomationService {
 
   /** Gera a resposta pública (visível no comentário) — nunca inclui link. */
   private async generateAiCommentReply(auto: InstagramAutomation, commentText: string): Promise<string> {
-    const fallback = auto.commentReply || 'Verifica lá na sua DM, já te mandei! 😉';
+    const fallback = auto.commentReply || 'Verifica lá na sua DM, já te mandei!';
     try {
       const basePrompt = auto.aiPrompt || DEFAULT_IG_AI_PROMPT;
       const response = await this.openai.chat.completions.create({
@@ -877,7 +877,7 @@ export class InstagramAutomationService {
           message: {
             text,
             quick_replies: [
-              { content_type: 'text', title: 'Sim, quero! ✅', payload: 'CONFIRM_YES' },
+              { content_type: 'text', title: 'Sim, quero!', payload: 'CONFIRM_YES' },
               { content_type: 'text', title: 'Não, obrigado', payload: 'CONFIRM_NO' },
             ],
           },

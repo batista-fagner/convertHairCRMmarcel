@@ -312,7 +312,7 @@ export class EfraimController {
   private async handleNomeStage(lead: Lead, text: string) {
     const name = this.extractName(text);
     const firstName = name.split(' ')[0];
-    const question = `prazer, ${firstName}! 🙌\nme conta, qual a faixa de faturamento do seu negócio hoje?\n\n1 - até 10k\n2 - 10k a 30k\n3 - 30k a 100k\n4 - 100k a 300k\n5 - acima de 300k\n\npode mandar só o número`;
+    const question = `prazer, ${firstName}!\nme conta, qual a faixa de faturamento do seu negócio hoje?\n\n1 - até 10k\n2 - 10k a 30k\n3 - 30k a 100k\n4 - 100k a 300k\n5 - acima de 300k\n\npode mandar só o número`;
 
     const history = Array.isArray(lead.aiContext) ? lead.aiContext : [];
     const aiContext = [...history, { role: 'user', content: text }, { role: 'assistant', content: question }];
@@ -334,7 +334,7 @@ export class EfraimController {
   private async handleFaturamentoStage(lead: Lead, text: string): Promise<boolean> {
     const bucket = this.parseRevenue(text);
     if (!bucket) {
-      const reask = `não entendi 😅 me manda só o número da faixa:\n\n1 - até 10k\n2 - 10k a 30k\n3 - 30k a 100k\n4 - 100k a 300k\n5 - acima de 300k`;
+      const reask = `não entendi, me manda só o número da faixa:\n\n1 - até 10k\n2 - 10k a 30k\n3 - 30k a 100k\n4 - 100k a 300k\n5 - acima de 300k`;
       const history = Array.isArray(lead.aiContext) ? lead.aiContext : [];
       await this.leadsService.update(lead.id, {
         aiContext: [...history, { role: 'user', content: text }, { role: 'assistant', content: reask }],

@@ -68,7 +68,7 @@ Linha 3: pergunta aberta sobre o negócio — "me conta.. qual é tua maior difi
 TOM:
 - Coloquial, como amigo no WhatsApp: "cara", "show", "faz sentido", "que legal"
 - Reticências (".." ou "...") para dar ritmo natural
-- Sem emojis ou no máximo 1
+- SEM EMOJIS — nenhum, em nenhuma hipótese
 - Nunca formal, nunca técnico demais
 - Máximo 3 linhas curtas
 
@@ -202,7 +202,7 @@ REGRAS PARA O FOLLOW-UP:
 - Tom coloquial e casual, como amigo no WhatsApp
 - Máximo 3 linhas curtas
 - Use reticências (".." ou "...") para ritmo natural
-- Sem emojis ou no máximo 1
+- SEM EMOJIS — nenhum, em nenhuma hipótese
 - Termine com uma pergunta ou gancho leve, não agressivo
 - Nunca mencione "follow-up" ou que está fazendo contato de novo explicitamente
 

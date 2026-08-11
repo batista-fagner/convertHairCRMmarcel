@@ -164,8 +164,8 @@ export class GroupJoinService implements OnModuleInit {
     // Mensagem de abertura — pula pergunta de nome se já tiver
     const firstName = leadName.split(' ')[0];
     const opening = hasName
-      ? `opa, ${firstName}! aqui é o Efraim, da equipe do Fagner 👋 parabéns por entrar no grupo de implementação de funil com IA! tenho um presentinho pra você no final\n\nme conta, qual a faixa de faturamento do seu negócio hoje?\n\n1 - até 10k\n2 - 10k a 30k\n3 - 30k a 100k\n4 - 100k a 300k\n5 - acima de 300k\n\npode mandar só o número`
-      : `opa! aqui é o Efraim, da equipe do Fagner 👋 parabéns por entrar no grupo de implementação de funil com IA! tenho um presentinho pra você no final, me diz seu Nome antes por favor!`;
+      ? `opa, ${firstName}! aqui é o Efraim, da equipe do Fagner. parabéns por entrar no grupo de implementação de funil com IA! tenho um presentinho pra você no final\n\nme conta, qual a faixa de faturamento do seu negócio hoje?\n\n1 - até 10k\n2 - 10k a 30k\n3 - 30k a 100k\n4 - 100k a 300k\n5 - acima de 300k\n\npode mandar só o número`
+      : `opa! aqui é o Efraim, da equipe do Fagner. parabéns por entrar no grupo de implementação de funil com IA! tenho um presentinho pra você no final, me diz seu Nome antes por favor!`;
 
     await this.messagingService.sendRawMessage(phone, opening);
     await this.leadsService.update(lead.id, {
