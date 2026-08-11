@@ -118,6 +118,24 @@ export class LeadsController {
     return this.leadsService.getStats();
   }
 
+  // Lista de conversas pro Inbox WhatsApp (tela separada do Kanban, pra
+  // operador escrever manualmente e ativar leads importados). filter:
+  // all | imported | never-contacted
+  @Get('inbox')
+  async inbox(
+    @Query('filter') filter?: 'all' | 'imported' | 'never-contacted',
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.leadsService.findInboxList({
+      filter,
+      search,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 30,
+    });
+  }
+
   @Get('analytics/ads')
   async getAdPerformance(@Query('from') from?: string, @Query('to') to?: string) {
     const rows = await this.leadsService.getAdPerformance(from, to);

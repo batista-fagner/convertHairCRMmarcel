@@ -92,6 +92,79 @@ export class LeadsService {
     return { data, total, page, totalPages };
   }
 
+  /**
+   * Lista de conversas pro Inbox WhatsApp (tela separada do Kanban — operador
+   * escreve manualmente pro lead, sem estágio/raia). Só campos leves: evita
+   * repetir o erro do cron de follow-up (egress alto por trazer jsonb pesado
+   * de mais em toda linha) — aiContext é trazido só pra extrair a prévia da
+   * última mensagem aqui, e descartado antes de devolver ao controller.
+   */
+  async findInboxList(opts?: {
+    filter?: 'all' | 'imported' | 'never-contacted';
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: Partial<Lead>[]; total: number; page: number; totalPages: number }> {
+    const page = opts?.page || 1;
+    const limit = opts?.limit || 30;
+    const filter = opts?.filter || 'all';
+    const skip = (page - 1) * limit;
+
+    const query = this.leadsRepo
+      .createQueryBuilder('lead')
+      .select([
+        'lead.id',
+        'lead.name',
+        'lead.phone',
+        'lead.avatarUrl',
+        'lead.aiPaused',
+        'lead.kanbanStage',
+        'lead.temperature',
+        'lead.importedAt',
+        'lead.waLastMessageAt',
+        'lead.createdAt',
+        'lead.aiContext',
+      ])
+      .where('lead.agent_mode = :mode', { mode: 'sdr' });
+
+    if (filter === 'imported') query.andWhere('lead.imported_at IS NOT NULL');
+    else if (filter === 'never-contacted') query.andWhere('lead.wa_last_message_at IS NULL');
+
+    const search = opts?.search?.trim();
+    if (search) {
+      const digits = search.replace(/\D/g, '');
+      query.andWhere(
+        '(lead.name ILIKE :search' + (digits ? ' OR lead.phone ILIKE :digits' : '') + ')',
+        { search: `%${search}%`, ...(digits ? { digits: `%${digits}%` } : {}) },
+      );
+    }
+
+    const total = await query.getCount();
+    const rows = await query
+      .orderBy('lead.wa_last_message_at', 'DESC', 'NULLS LAST')
+      .addOrderBy('lead.created_at', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .getMany();
+
+    // Prévia da última mensagem calculada aqui e o histórico completo
+    // descartado — a thread inteira só é buscada quando o operador abre a
+    // conversa (GET /leads/:id), não na lista.
+    const data = rows.map((lead) => {
+      const ctx = Array.isArray(lead.aiContext) ? lead.aiContext : [];
+      const last = ctx[ctx.length - 1];
+      const { aiContext, ...rest } = lead;
+      return {
+        ...rest,
+        lastMessagePreview: last?.content || (last?.mediaType ? `[${last.mediaType}]` : null),
+        lastMessageRole: last?.role || null,
+        lastMessageSource: last?.source || null,
+      };
+    });
+
+    return { data, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
   async update(id: string, dto: Partial<Lead>): Promise<Lead> {
     await this.leadsRepo.update(id, dto);
     return this.findById(id);

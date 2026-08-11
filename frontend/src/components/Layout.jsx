@@ -24,6 +24,7 @@ import {
   Camera,
   Calendar,
   Send,
+  Inbox,
 } from 'lucide-react'
 
 const NAV_GROUPS = [
@@ -48,6 +49,7 @@ const NAV_GROUPS = [
     label: 'Automação',
     items: [
       { icon: Send, label: 'Disparo em Massa', path: '/bulk-message' },
+      { icon: Inbox, label: 'Inbox WhatsApp', path: '/whatsapp-inbox' },
       { icon: Mail, label: 'Email Sequences', path: '/email-sequences', disabled: true },
       { icon: MessageCircle, label: 'WhatsApp', path: '/whatsapp', disabled: true },
     ],
@@ -90,6 +92,7 @@ const PAGE_TITLES = {
   '/analytics': 'Analytics',
   '/email-sequences': 'Email Sequences',
   '/whatsapp': 'WhatsApp & Leads',
+  '/whatsapp-inbox': 'Inbox WhatsApp',
   '/sms': 'SMS Inbox',
   '/instagram': 'Instagram Leads',
   '/instagram-auto': 'IG Automação',
