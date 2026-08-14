@@ -15,6 +15,29 @@ function mediaIcon(type) {
   return <FileText className="w-4 h-4" />
 }
 
+// A bolha mostra só hora:minuto, então mensagens de dias diferentes pareciam
+// consecutivas (ex.: follow-up de 21:37 e o do dia seguinte às 21:38 lidos como
+// "dois disparos seguidos"). Estas duas funções agrupam por dia em BRT pra
+// renderizar um separador entre os dias.
+function dayKeyBRT(ts) {
+  if (!ts) return null
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return null
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d)
+}
+
+function dayLabel(key) {
+  const today = dayKeyBRT(new Date())
+  const yesterday = dayKeyBRT(new Date(Date.now() - 86400000))
+  if (key === today) return 'Hoje'
+  if (key === yesterday) return 'Ontem'
+  // key vem como 'YYYY-MM-DD' (en-CA); monta meio-dia UTC pra não escorregar de dia.
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('pt-BR', {
+    day: '2-digit', month: 'short', year: y === new Date().getFullYear() ? undefined : 'numeric',
+  })
+}
+
 /**
  * Painel de conversa de um lead — header (avatar/telefone/badges), notas
  * internas, thread com histórico (aiContext) e composer com mídia. Extraído
@@ -275,8 +298,20 @@ export default function LeadConversationPanel({
         {ctx.map((m, i) => {
           const isLead = m.role === 'user'
           const isOperator = m.role === 'assistant' && m.source === 'operator'
+          // Separador quando vira o dia (ou na 1ª mensagem que tem timestamp).
+          const key = dayKeyBRT(m.timestamp)
+          const prevKey = i > 0 ? dayKeyBRT(ctx[i - 1].timestamp) : null
+          const showDaySeparator = key && key !== prevKey
           return (
-            <div key={i} className={`flex ${isLead ? 'justify-start' : 'justify-end'}`}>
+            <div key={i}>
+            {showDaySeparator && (
+              <div className="flex items-center gap-2 py-2">
+                <div className="flex-1 h-px bg-slate-200" />
+                <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">{dayLabel(key)}</span>
+                <div className="flex-1 h-px bg-slate-200" />
+              </div>
+            )}
+            <div className={`flex ${isLead ? 'justify-start' : 'justify-end'}`}>
               <div
                 className={`max-w-[72%] px-3.5 py-2 rounded-2xl text-sm break-words ${
                   isLead
@@ -322,6 +357,7 @@ export default function LeadConversationPanel({
                   )}
                 </div>
               </div>
+            </div>
             </div>
           )
         })}

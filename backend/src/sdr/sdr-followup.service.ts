@@ -73,6 +73,52 @@ export {
   MAX_CADENCE_STEPS, MAX_STEP_MINUTES,
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// ÂNGULO POR TOQUE
+//
+// Antes, todo toque da cadência recebia a mesma instrução ("retome a MESMA
+// pergunta com outras palavras") e o modelo entregava três mensagens quase
+// idênticas — só o quebra-gelo mudava e a pergunta vinha literalmente igual
+// (ver lead Elenice / 1 978 760-7283: 3 toques com "Vc já tem seu próprio
+// schedule ou ainda trabalha como helper?"). O bloco anti-repetição sozinho
+// não resolvia porque a própria instrução mandava repetir a pergunta.
+//
+// Agora cada toque tem um ângulo DIFERENTE: insistir na mesma pergunta só no
+// toque 1; depois muda a entrada do assunto e, no fim, uma pergunta binária
+// com saída fácil (que também dá ao lead a chance de dizer "não", encerrando
+// a cadência em vez de virar perseguição).
+const EARLY_STAGE_ANGLES = [
+  `Missão: retomar a pergunta única (se ela já é dona do próprio schedule ou ainda trabalha como helper) com OUTRAS palavras — nunca a frase exata da abertura. Direto e leve.`,
+
+  `Missão: NÃO faça de novo a mesma pergunta da abertura — ela já ignorou essa formulação uma vez, insistir nela soa robótico. Mude a entrada do assunto: comente em uma frase concreta o que muda pra quem sai de helper e passa a ter os próprios clientes, e feche com uma pergunta ABERTA e diferente sobre o momento dela hoje (ex.: como está a rotina de trabalho dela agora).`,
+
+  `Missão: último tipo de toque — pergunta BINÁRIA, fácil de responder com uma palavra, e que dê saída digna. Deixe claro, sem drama, que se não for o momento dela tudo bem e você para de mandar mensagem. Nada de reformular a pergunta da abertura pela terceira vez.`,
+];
+
+const SCHEDULE_REMINDER_ANGLES = [
+  `Missão: perguntar, curto e educado, se ela já conseguiu dar uma olhada nos horários.`,
+
+  `Missão: NÃO repita "já conseguiu ver os horários?" — ela já não respondeu isso uma vez. Mude a entrada: pergunte qual PERÍODO funciona melhor pra ela (manhã, tarde ou noite / dia de semana ou fim de semana), pra você encaixar em vez de ela ter que escolher da lista.`,
+
+  `Missão: último tipo de toque — pergunta BINÁRIA, fácil de responder com uma palavra, e que dê saída digna: se ela quer que você segure um horário ou se prefere deixar pra mais pra frente. Deixe claro, sem drama, que se não for o momento tudo bem e você para de mandar mensagem.`,
+];
+
+// Tom compartilhado pelos toques da cadência. A regra da estrutura variável é
+// o que impede o padrão "frase empática + \n + pergunta" se repetir em todos.
+const CADENCE_TOM_BLOCK = `TOM:
+- VARIE A ESTRUTURA a cada toque. É PROIBIDO usar sempre o mesmo formato "frase de empatia sobre a correria + quebra de linha + pergunta" — foi exatamente isso que entregou que era bot nas mensagens anteriores. Às vezes vá direto ao ponto sem quebra-gelo nenhum; às vezes faça só uma afirmação curta; às vezes uma pergunta sozinha.
+- PROIBIDO reciclar variações de "imagino a correria", "sei que a rotina aperta", "a correria não para" — essas já foram usadas à exaustão.
+- Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
+- PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
+- Trate por "vc", nunca "você" por extenso.
+- SEM EMOJIS — nenhum, em nenhuma hipótese.
+- Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
+- Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
+
+Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas ao redor.`;
+
+export { EARLY_STAGE_ANGLES, SCHEDULE_REMINDER_ANGLES, CADENCE_TOM_BLOCK };
+
 @Injectable()
 export class SdrFollowupService {
   private readonly logger = new Logger(SdrFollowupService.name);
@@ -523,8 +569,8 @@ export class SdrFollowupService {
       // precisa retomar essa pergunta, não presumir uma agenda que nunca foi
       // oferecida (ver lead.donaDeSchedule em sdr.service.ts).
       const message = lead.donaDeSchedule == null
-        ? await this.generateEarlyStageFollowup(lead, offsetMinutes)
-        : await this.generateScheduleReminderFollowup(lead, offsetMinutes);
+        ? await this.generateEarlyStageFollowup(lead, offsetMinutes, stepIndex)
+        : await this.generateScheduleReminderFollowup(lead, offsetMinutes, stepIndex);
       if (!message) continue;
 
       if (sent > 0) {
@@ -639,6 +685,23 @@ export class SdrFollowupService {
     };
   }
 
+  /**
+   * Lista as últimas mensagens que a IA já mandou nesta conversa, pra proibir
+   * repetição. Usa até 5 (não 3): com a cadência de 8 toques, 3 era pouco — o
+   * modelo voltava a reusar a formulação do 1º toque assim que ela saía da
+   * janela. Também pede explicitamente pra não repetir só a PERGUNTA, que era
+   * a parte que vinha idêntica mesmo com o quebra-gelo variando.
+   */
+  private antiRepeatBlock(history: OpenAI.Chat.ChatCompletionMessageParam[]): string {
+    const previous = history
+      .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
+      .slice(-5)
+      .map((m) => m.content as string);
+    if (previous.length === 0) return '';
+
+    return `\n\nMENSAGENS QUE VOCÊ JÁ MANDOU NESTA CONVERSA — a nova tem que soar como uma mensagem NOVA, escrita do zero. PROIBIDO reusar qualquer uma delas quase palavra por palavra, PROIBIDO repetir a mesma frase de abertura e PROIBIDO refazer a mesma PERGUNTA com sinônimos (trocar "vc já tem" por "vc já é" continua sendo a mesma pergunta, não vale):\n${previous.map((t) => `- "${t}"`).join('\n')}`;
+  }
+
   private lastMessageWasFromAI(lead: Lead): boolean {
     const ctx = Array.isArray(lead.aiContext) ? lead.aiContext : [];
     if (ctx.length === 0) return false;
@@ -736,7 +799,7 @@ ${tomBlock}`;
    * pergunta sobre horários/agenda aqui (isso é generateScheduleReminderFollowup,
    * usado só depois que ela responder).
    */
-  private async generateEarlyStageFollowup(lead: Lead, delayMinutes: number): Promise<string> {
+  private async generateEarlyStageFollowup(lead: Lead, delayMinutes: number, stepIndex = 0): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
       const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
@@ -748,31 +811,15 @@ ${tomBlock}`;
 
       const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
 
-      const previousFollowups = history
-        .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
-        .slice(-3)
-        .map((m) => (m.content as string));
-
-      const antiRepeatBlock = previousFollowups.length
-        ? `\n\nMENSAGENS ANTERIORES QUE VOCÊ (OU UM FOLLOW-UP ANTERIOR) JÁ MANDOU NESTA CONVERSA — PROIBIDO repetir a mesma frase de abertura ou reusar qualquer uma dessas quase palavra por palavra, tem que soar como uma mensagem NOVA e diferente:\n${previousFollowups.map((t) => `- "${t}"`).join('\n')}`
-        : '';
+      const angle = EARLY_STAGE_ANGLES[Math.min(stepIndex, EARLY_STAGE_ANGLES.length - 1)];
 
       const instruction = `IMPORTANTE — ISSO NÃO É REATIVAÇÃO GENÉRICA NEM PERGUNTA SOBRE AGENDA: você mandou a abertura pra ela apresentando a Clara e perguntando se ela já é dona do próprio schedule ou ainda trabalha como helper, mas faz ${hours} e ela não respondeu essa pergunta (ou a mensagem que ela mandou não deixou isso claro).
 
 PROIBIDO nesta mensagem: falar de horários, agenda ou Sessão de Mentoria — isso só vem DEPOIS que ela responder a pergunta única, e ela ainda não respondeu.
 
-SUA ÚNICA MISSÃO: gerar UMA mensagem curta retomando a MESMA pergunta única (dona do próprio schedule ou helper), com outras palavras — nunca repita a frase exata da abertura.${antiRepeatBlock}
+ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}${this.antiRepeatBlock(history)}
 
-TOM:
-- Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
-- Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
-- PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
-- Trate por "vc", nunca "você" por extenso.
-- SEM EMOJIS — nenhum, em nenhuma hipótese.
-- Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
-- Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
-
-Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas ao redor.`;
+${CADENCE_TOM_BLOCK}`;
 
       const response = await this.openai.chat.completions.create({
         model,
@@ -802,7 +849,7 @@ Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas 
    * como cobrança. A checagem de "já agendou" já aconteceu antes (ver
    * processNurtureCadence) — chegando aqui, sabemos que ainda não tem appointment.
    */
-  private async generateScheduleReminderFollowup(lead: Lead, delayMinutes: number): Promise<string> {
+  private async generateScheduleReminderFollowup(lead: Lead, delayMinutes: number, stepIndex = 0): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
       const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
@@ -814,29 +861,15 @@ Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas 
 
       const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
 
-      const previousFollowups = history
-        .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
-        .slice(-3)
-        .map((m) => (m.content as string));
-
-      const antiRepeatBlock = previousFollowups.length
-        ? `\n\nMENSAGENS ANTERIORES QUE VOCÊ (OU UM FOLLOW-UP ANTERIOR) JÁ MANDOU NESTA CONVERSA — PROIBIDO repetir a mesma frase de abertura ou reusar qualquer uma dessas quase palavra por palavra, tem que soar como uma mensagem NOVA e diferente:\n${previousFollowups.map((t) => `- "${t}"`).join('\n')}`
-        : '';
+      const angle = SCHEDULE_REMINDER_ANGLES[Math.min(stepIndex, SCHEDULE_REMINDER_ANGLES.length - 1)];
 
       const instruction = `IMPORTANTE — ISSO NÃO É QUALIFICAÇÃO NEM REATIVAÇÃO GENÉRICA: você já ofereceu horários da agenda pra Sessão de Mentoria Gratuita com o Marcel, mas ela não confirmou nenhum ainda (faz ${hours} desde então, sem resposta).
 
-SUA ÚNICA MISSÃO: gerar UMA mensagem curta e educada perguntando se ela já conseguiu ver os horários e escolher um, se oferecendo pra ajudar a escolher. NÃO repita a lista de horários inteira de novo — só pergunte, e se ela pedir, você mostra de novo na próxima resposta (fora deste follow-up).${antiRepeatBlock}
+NUNCA repita a lista de horários inteira de novo — se ela pedir, você mostra na próxima resposta (fora deste follow-up).
 
-TOM:
-- Comece quebrando o gelo com empatia (reconhecendo a correria, sem soar como cobrança).
-- Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
-- PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
-- Trate por "vc", nunca "você" por extenso.
-- SEM EMOJIS — nenhum, em nenhuma hipótese.
-- Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
-- Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
+ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}${this.antiRepeatBlock(history)}
 
-Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas ao redor.`;
+${CADENCE_TOM_BLOCK}`;
 
       const response = await this.openai.chat.completions.create({
         model,
