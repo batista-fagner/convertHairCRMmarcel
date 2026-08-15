@@ -41,7 +41,9 @@ const DEFAULT_CADENCE_STEPS = [30, 120, 1440, 1440, 1440, 1440, 1440, 1440];
 
 export interface CadenceWindow { start: number; end: number }
 export interface CadenceWindows { weekday: CadenceWindow[]; saturday: CadenceWindow[]; sunday: CadenceWindow[] }
-export interface CadenceConfig { enabled: boolean; steps: number[]; windows: CadenceWindows }
+// `guides[i]` = mensagem-base que o operador escreveu pro toque i (mesmo índice
+// de `steps`). String vazia = sem roteiro, a IA usa o ângulo automático.
+export interface CadenceConfig { enabled: boolean; steps: number[]; windows: CadenceWindows; guides: string[] }
 
 // Janelas de envio automático (nunca restringe o chat ao vivo, só o follow-up
 // automático), tudo em BRT. Cada dia pode ter mais de uma janela — a manhã
@@ -56,6 +58,11 @@ const DEFAULT_CADENCE_WINDOWS: CadenceWindows = {
 const CADENCE_ENABLED_KEY = 'sdr_cadence_enabled';
 const CADENCE_STEPS_KEY = 'sdr_cadence_steps';
 const CADENCE_WINDOWS_KEY = 'sdr_cadence_windows';
+const CADENCE_GUIDES_KEY = 'sdr_cadence_guides';
+
+// Teto por roteiro de toque — o texto entra no prompt, então não pode virar um
+// documento inteiro (estouraria o contexto e diluiria as regras de tom).
+const MAX_GUIDE_LENGTH = 1000;
 
 // Limites de sanidade pro que vem da tela (evita passo de 0min virar loop de
 // envio, ou uma lista gigante travar o cron).
@@ -69,8 +76,8 @@ const STOP_CADENCE_REGEX = /\bstop\b|\bpare\b|\bparar\b|cancela|n[aã]o\s+tenho\
 
 export {
   DEFAULT_CADENCE_STEPS, DEFAULT_CADENCE_WINDOWS, STOP_CADENCE_REGEX,
-  CADENCE_ENABLED_KEY, CADENCE_STEPS_KEY, CADENCE_WINDOWS_KEY,
-  MAX_CADENCE_STEPS, MAX_STEP_MINUTES,
+  CADENCE_ENABLED_KEY, CADENCE_STEPS_KEY, CADENCE_WINDOWS_KEY, CADENCE_GUIDES_KEY,
+  MAX_CADENCE_STEPS, MAX_STEP_MINUTES, MAX_GUIDE_LENGTH,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -105,19 +112,23 @@ const SCHEDULE_REMINDER_ANGLES = [
 
 // Tom compartilhado pelos toques da cadência. A regra da estrutura variável é
 // o que impede o padrão "frase empática + \n + pergunta" se repetir em todos.
-const CADENCE_TOM_BLOCK = `TOM:
+// `hasGuide` só troca a regra de tamanho: com roteiro do operador, o tamanho
+// segue o que ele escreveu (senão "1-2 frases" cortaria o roteiro dele pela metade).
+const cadenceTomBlock = (hasGuide = false) => `TOM:
 - VARIE A ESTRUTURA a cada toque. É PROIBIDO usar sempre o mesmo formato "frase de empatia sobre a correria + quebra de linha + pergunta" — foi exatamente isso que entregou que era bot nas mensagens anteriores. Às vezes vá direto ao ponto sem quebra-gelo nenhum; às vezes faça só uma afirmação curta; às vezes uma pergunta sozinha.
 - PROIBIDO reciclar variações de "imagino a correria", "sei que a rotina aperta", "a correria não para" — essas já foram usadas à exaustão.
 - Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
 - PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
 - Trate por "vc", nunca "você" por extenso.
 - SEM EMOJIS — nenhum, em nenhuma hipótese.
-- Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.
+- ${hasGuide
+  ? 'O tamanho acompanha o roteiro: se ele for curto, a mensagem é curta; se cobrir mais coisa, pode ter algumas frases a mais. Nunca vire textão, lista ou parágrafo formal.'
+  : 'Curta (1-2 frases). Sem parágrafo, sem lista, sem "!" em excesso.'}
 - Nunca use frase de vendedor pressionando ("não perca essa oportunidade", "última chance").
 
 Responda APENAS com o texto da mensagem, sem JSON, sem explicações, sem aspas ao redor.`;
 
-export { EARLY_STAGE_ANGLES, SCHEDULE_REMINDER_ANGLES, CADENCE_TOM_BLOCK };
+export { EARLY_STAGE_ANGLES, SCHEDULE_REMINDER_ANGLES, cadenceTomBlock };
 
 @Injectable()
 export class SdrFollowupService {
@@ -390,16 +401,30 @@ export class SdrFollowupService {
   }
 
   /**
+   * Roteiros dos toques, sempre com exatamente `stepCount` posições: sobra é
+   * cortada (toque removido) e falta vira string vazia (toque novo, sem roteiro
+   * = a IA volta ao ângulo automático daquele toque).
+   */
+  private sanitizeGuides(raw: unknown, stepCount: number): string[] {
+    const list = Array.isArray(raw) ? raw : [];
+    return Array.from({ length: stepCount }, (_, i) => {
+      const v = list[i];
+      return typeof v === 'string' ? v.trim().slice(0, MAX_GUIDE_LENGTH) : '';
+    });
+  }
+
+  /**
    * Configuração atual da cadência (passos + janelas + on/off). Lê de `settings`
    * e cai no default do código quando não há nada salvo ou o valor está corrompido.
    */
   async getCadenceConfig(): Promise<CadenceConfig> {
     if (this.cadenceCache) return this.cadenceCache;
 
-    const [enabledRaw, stepsRaw, windowsRaw] = await Promise.all([
+    const [enabledRaw, stepsRaw, windowsRaw, guidesRaw] = await Promise.all([
       this.settings.get(CADENCE_ENABLED_KEY),
       this.settings.get(CADENCE_STEPS_KEY),
       this.settings.get(CADENCE_WINDOWS_KEY),
+      this.settings.get(CADENCE_GUIDES_KEY),
     ]);
 
     let steps = DEFAULT_CADENCE_STEPS;
@@ -431,8 +456,19 @@ export class SdrFollowupService {
       }
     }
 
+    let guides: string[] = [];
+    if (guidesRaw) {
+      try {
+        guides = this.sanitizeGuides(JSON.parse(guidesRaw), steps.length);
+      } catch {
+        this.logger.warn(`[CADENCE] ${CADENCE_GUIDES_KEY} inválido no banco — ignorando os roteiros`);
+      }
+    }
+    // Sempre alinhado a steps: toque adicionado depois nasce sem roteiro.
+    guides = this.sanitizeGuides(guides, steps.length);
+
     // Sem chave salva = ligada (preserva o comportamento de antes da tela existir).
-    this.cadenceCache = { enabled: enabledRaw == null ? true : enabledRaw === 'true', steps, windows };
+    this.cadenceCache = { enabled: enabledRaw == null ? true : enabledRaw === 'true', steps, windows, guides };
     return this.cadenceCache;
   }
 
@@ -441,6 +477,9 @@ export class SdrFollowupService {
     if (input.enabled !== undefined) {
       await this.settings.set(CADENCE_ENABLED_KEY, input.enabled ? 'true' : 'false');
     }
+    // Quantos toques a cadência terá depois deste save — os roteiros são
+    // alinhados a esse tamanho (índice do roteiro = índice do toque).
+    let stepCount = (await this.getCadenceConfig()).steps.length;
     if (input.steps !== undefined) {
       const clean = (Array.isArray(input.steps) ? input.steps : [])
         .map((n) => Math.floor(Number(n)))
@@ -448,6 +487,10 @@ export class SdrFollowupService {
         .slice(0, MAX_CADENCE_STEPS);
       if (clean.length === 0) throw new Error('A cadência precisa de pelo menos 1 toque válido');
       await this.settings.set(CADENCE_STEPS_KEY, JSON.stringify(clean));
+      stepCount = clean.length;
+    }
+    if (input.guides !== undefined) {
+      await this.settings.set(CADENCE_GUIDES_KEY, JSON.stringify(this.sanitizeGuides(input.guides, stepCount)));
     }
     if (input.windows !== undefined) {
       const w = input.windows;
@@ -568,9 +611,12 @@ export class SdrFollowupService {
       // ainda null significa que ela sumiu ANTES de responder, então o toque
       // precisa retomar essa pergunta, não presumir uma agenda que nunca foi
       // oferecida (ver lead.donaDeSchedule em sdr.service.ts).
+      // Roteiro que o operador escreveu pra este toque (vazio = ângulo automático).
+      const guide = cadence.guides[stepIndex] ?? '';
+
       const message = lead.donaDeSchedule == null
-        ? await this.generateEarlyStageFollowup(lead, offsetMinutes, stepIndex)
-        : await this.generateScheduleReminderFollowup(lead, offsetMinutes, stepIndex);
+        ? await this.generateEarlyStageFollowup(lead, offsetMinutes, stepIndex, guide)
+        : await this.generateScheduleReminderFollowup(lead, offsetMinutes, stepIndex, guide);
       if (!message) continue;
 
       if (sent > 0) {
@@ -692,6 +738,22 @@ export class SdrFollowupService {
    * janela. Também pede explicitamente pra não repetir só a PERGUNTA, que era
    * a parte que vinha idêntica mesmo com o quebra-gelo variando.
    */
+  /**
+   * Bloco de instrução quando o operador escreveu um roteiro pra este toque.
+   * Substitui o ângulo automático inteiro (e a proibição de assunto que vem com
+   * ele): quem define o conteúdo passa a ser o texto do operador — instrução
+   * concorrente é justamente o que fazia os toques saírem iguais antes.
+   */
+  private guideBlock(stepIndex: number, guide: string): string {
+    return `ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA E ELE TEM ROTEIRO PRÓPRIO, escrito pelo operador:
+
+"""
+${guide}
+"""
+
+Esse roteiro define O QUE dizer neste toque — o assunto, a intenção e a pergunta são os dele, e nenhum outro. NÃO copie o texto palavra por palavra: reescreva com as suas palavras, no seu tom, encaixando no que já foi conversado com ela (use o nome/contexto dela quando fizer sentido). Se o roteiro citar algo que já foi resolvido na conversa, adapte em vez de repetir.`;
+  }
+
   private antiRepeatBlock(history: OpenAI.Chat.ChatCompletionMessageParam[]): string {
     const previous = history
       .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
@@ -799,7 +861,7 @@ ${tomBlock}`;
    * pergunta sobre horários/agenda aqui (isso é generateScheduleReminderFollowup,
    * usado só depois que ela responder).
    */
-  private async generateEarlyStageFollowup(lead: Lead, delayMinutes: number, stepIndex = 0): Promise<string> {
+  private async generateEarlyStageFollowup(lead: Lead, delayMinutes: number, stepIndex = 0, guide = ''): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
       const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
@@ -811,15 +873,21 @@ ${tomBlock}`;
 
       const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
 
+      const contexto = `CONTEXTO: você mandou a abertura pra ela apresentando a Clara e perguntando se ela já é dona do próprio schedule ou ainda trabalha como helper, mas faz ${hours} e ela não respondeu essa pergunta (ou a mensagem que ela mandou não deixou isso claro).`;
+
       const angle = EARLY_STAGE_ANGLES[Math.min(stepIndex, EARLY_STAGE_ANGLES.length - 1)];
 
-      const instruction = `IMPORTANTE — ISSO NÃO É REATIVAÇÃO GENÉRICA NEM PERGUNTA SOBRE AGENDA: você mandou a abertura pra ela apresentando a Clara e perguntando se ela já é dona do próprio schedule ou ainda trabalha como helper, mas faz ${hours} e ela não respondeu essa pergunta (ou a mensagem que ela mandou não deixou isso claro).
+      const miolo = guide
+        ? this.guideBlock(stepIndex, guide)
+        : `PROIBIDO nesta mensagem: falar de horários, agenda ou Sessão de Mentoria — isso só vem DEPOIS que ela responder a pergunta única, e ela ainda não respondeu.
 
-PROIBIDO nesta mensagem: falar de horários, agenda ou Sessão de Mentoria — isso só vem DEPOIS que ela responder a pergunta única, e ela ainda não respondeu.
+ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}`;
 
-ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}${this.antiRepeatBlock(history)}
+      const instruction = `${contexto}
 
-${CADENCE_TOM_BLOCK}`;
+${miolo}${this.antiRepeatBlock(history)}
+
+${cadenceTomBlock(!!guide)}`;
 
       const response = await this.openai.chat.completions.create({
         model,
@@ -849,7 +917,7 @@ ${CADENCE_TOM_BLOCK}`;
    * como cobrança. A checagem de "já agendou" já aconteceu antes (ver
    * processNurtureCadence) — chegando aqui, sabemos que ainda não tem appointment.
    */
-  private async generateScheduleReminderFollowup(lead: Lead, delayMinutes: number, stepIndex = 0): Promise<string> {
+  private async generateScheduleReminderFollowup(lead: Lead, delayMinutes: number, stepIndex = 0, guide = ''): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
       const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
@@ -861,15 +929,21 @@ ${CADENCE_TOM_BLOCK}`;
 
       const hours = delayMinutes >= 60 ? `${Math.round(delayMinutes / 60)}h` : `${delayMinutes}min`;
 
+      const contexto = `CONTEXTO: você já ofereceu horários da agenda pra Sessão de Mentoria Gratuita com o Marcel, mas ela não confirmou nenhum ainda (faz ${hours} desde então, sem resposta).
+
+NUNCA repita a lista de horários inteira de novo — se ela pedir, você mostra na próxima resposta (fora deste follow-up).`;
+
       const angle = SCHEDULE_REMINDER_ANGLES[Math.min(stepIndex, SCHEDULE_REMINDER_ANGLES.length - 1)];
 
-      const instruction = `IMPORTANTE — ISSO NÃO É QUALIFICAÇÃO NEM REATIVAÇÃO GENÉRICA: você já ofereceu horários da agenda pra Sessão de Mentoria Gratuita com o Marcel, mas ela não confirmou nenhum ainda (faz ${hours} desde então, sem resposta).
+      const miolo = guide
+        ? this.guideBlock(stepIndex, guide)
+        : `ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}`;
 
-NUNCA repita a lista de horários inteira de novo — se ela pedir, você mostra na próxima resposta (fora deste follow-up).
+      const instruction = `${contexto}
 
-ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}${this.antiRepeatBlock(history)}
+${miolo}${this.antiRepeatBlock(history)}
 
-${CADENCE_TOM_BLOCK}`;
+${cadenceTomBlock(!!guide)}`;
 
       const response = await this.openai.chat.completions.create({
         model,

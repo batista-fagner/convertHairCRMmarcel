@@ -1093,13 +1093,18 @@ function CadenceConfig() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [maxGuide, setMaxGuide] = useState(1000)
+  // Índice do toque com o editor de roteiro aberto (só um por vez, senão a
+  // lista de 8 toques vira uma parede de textareas).
+  const [openGuide, setOpenGuide] = useState(null)
 
   useEffect(() => {
     fetch(`${API}/followup/cadence`)
       .then(r => r.json())
       .then(data => {
-        setConfig({ enabled: data.enabled, steps: data.steps, windows: data.windows })
+        setConfig({ enabled: data.enabled, steps: data.steps, windows: data.windows, guides: data.guides ?? [] })
         setDefaults(data.defaults)
+        setMaxGuide(data.limits?.maxGuideLength ?? 1000)
       })
       .catch(() => setError('Não foi possível carregar a cadência.'))
       .finally(() => setLoading(false))
@@ -1107,9 +1112,24 @@ function CadenceConfig() {
 
   const patch = (changes) => { setConfig(c => ({ ...c, ...changes })); setSaved(false); setError('') }
 
+  // guides[i] acompanha steps[i] — qualquer mexida na lista de toques precisa
+  // mexer nas duas juntas, senão o roteiro do dia 3 vai parar no dia 2.
+  const guideAt = (i) => config.guides?.[i] ?? ''
   const setStep = (i, minutes) => patch({ steps: config.steps.map((s, idx) => (idx === i ? minutes : s)) })
-  const removeStep = (i) => patch({ steps: config.steps.filter((_, idx) => idx !== i) })
-  const addStep = () => patch({ steps: [...config.steps, 1440] })
+  const setGuide = (i, text) => patch({
+    guides: config.steps.map((_, idx) => (idx === i ? text : guideAt(idx))),
+  })
+  const removeStep = (i) => {
+    patch({
+      steps: config.steps.filter((_, idx) => idx !== i),
+      guides: config.steps.map((_, idx) => guideAt(idx)).filter((_, idx) => idx !== i),
+    })
+    setOpenGuide(null)
+  }
+  const addStep = () => patch({
+    steps: [...config.steps, 1440],
+    guides: [...config.steps.map((_, idx) => guideAt(idx)), ''],
+  })
 
   const setWindow = (dayKey, i, field, value) => {
     const v = Math.min(24, Math.max(0, Math.floor(Number(value) || 0)))
@@ -1137,7 +1157,7 @@ function CadenceConfig() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.message || 'Erro ao salvar')
-      setConfig({ enabled: data.enabled, steps: data.steps, windows: data.windows })
+      setConfig({ enabled: data.enabled, steps: data.steps, windows: data.windows, guides: data.guides ?? [] })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
@@ -1210,8 +1230,11 @@ function CadenceConfig() {
       <div className="space-y-1.5 mb-2">
         {config.steps.map((min, i) => {
           const { value, unit } = minutesToParts(min)
+          const guide = guideAt(i)
+          const isOpen = openGuide === i
           return (
-            <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+            <div key={i} className="bg-slate-50 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2">
               <span className="w-6 h-6 shrink-0 rounded-full bg-violet-100 text-violet-700 text-[11px] font-bold flex items-center justify-center">
                 {i + 1}
               </span>
@@ -1233,6 +1256,17 @@ function CadenceConfig() {
                 <option value="d">dias</option>
               </select>
               <span className="text-[11px] text-slate-400 ml-auto">cai em {fmtCumulative(timeline[i])}</span>
+              <button
+                onClick={() => setOpenGuide(isOpen ? null : i)}
+                className={`text-[11px] font-medium px-2 py-0.5 rounded-md border transition shrink-0 ${
+                  guide
+                    ? 'bg-violet-50 border-violet-300 text-violet-700'
+                    : 'border-slate-200 text-slate-400 hover:border-violet-300 hover:text-violet-600'
+                }`}
+                title="Mensagem-base que a IA usa pra escrever este toque"
+              >
+                {guide ? 'Roteiro ✓' : 'Roteiro'}
+              </button>
               {config.steps.length > 1 && (
                 <button
                   onClick={() => removeStep(i)}
@@ -1242,6 +1276,25 @@ function CadenceConfig() {
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
+            </div>
+            {isOpen && (
+              <div className="mt-2 pl-8">
+                <textarea
+                  value={guide}
+                  maxLength={maxGuide}
+                  onChange={e => setGuide(i, e.target.value)}
+                  rows={4}
+                  placeholder={'Escreva aqui a mensagem que a Clara deve mandar neste toque.\nEla reescreve com as palavras dela, encaixando na conversa.\nDeixe vazio pra ela decidir sozinha o que dizer.'}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs leading-relaxed focus:outline-none focus:border-violet-400 resize-y"
+                />
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-[11px] text-slate-400">
+                    A IA usa como base — não copia palavra por palavra.
+                  </span>
+                  <span className="text-[11px] text-slate-400">{guide.length}/{maxGuide}</span>
+                </div>
+              </div>
+            )}
             </div>
           )
         })}

@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
   SdrFollowupService, VIDEO_LIMIT_KEY, DEFAULT_VIDEO_LIMIT,
-  DEFAULT_CADENCE_STEPS, DEFAULT_CADENCE_WINDOWS, MAX_CADENCE_STEPS, MAX_STEP_MINUTES,
+  DEFAULT_CADENCE_STEPS, DEFAULT_CADENCE_WINDOWS, MAX_CADENCE_STEPS, MAX_STEP_MINUTES, MAX_GUIDE_LENGTH,
 } from './sdr-followup.service';
 import type { CadenceConfig } from './sdr-followup.service';
 import { FollowupVideoService } from './followup-video.service';
@@ -192,7 +192,7 @@ export class FollowupController {
     return {
       ...config,
       defaults: { steps: DEFAULT_CADENCE_STEPS, windows: DEFAULT_CADENCE_WINDOWS },
-      limits: { maxSteps: MAX_CADENCE_STEPS, maxStepMinutes: MAX_STEP_MINUTES },
+      limits: { maxSteps: MAX_CADENCE_STEPS, maxStepMinutes: MAX_STEP_MINUTES, maxGuideLength: MAX_GUIDE_LENGTH },
     };
   }
 
@@ -203,7 +203,7 @@ export class FollowupController {
       return {
         ...config,
         defaults: { steps: DEFAULT_CADENCE_STEPS, windows: DEFAULT_CADENCE_WINDOWS },
-        limits: { maxSteps: MAX_CADENCE_STEPS, maxStepMinutes: MAX_STEP_MINUTES },
+        limits: { maxSteps: MAX_CADENCE_STEPS, maxStepMinutes: MAX_STEP_MINUTES, maxGuideLength: MAX_GUIDE_LENGTH },
       };
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Cadência inválida');
