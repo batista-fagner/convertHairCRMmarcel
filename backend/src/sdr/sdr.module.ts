@@ -33,5 +33,6 @@ import { AppointmentsModule } from '../appointments/appointments.module';
   ],
   controllers: [SdrController, FollowupController, ManualMessageController, WhatsappInstanceController],
   providers: [SdrService, SdrFollowupService, FollowupVideoService, SdrWebhookGuardService],
+  exports: [SdrFollowupService],
 })
 export class SdrModule {}

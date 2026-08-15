@@ -112,13 +112,18 @@ const SCHEDULE_REMINDER_ANGLES = [
 
 // Tom compartilhado pelos toques da cadência. A regra da estrutura variável é
 // o que impede o padrão "frase empática + \n + pergunta" se repetir em todos.
-// `hasGuide` só troca a regra de tamanho: com roteiro do operador, o tamanho
-// segue o que ele escreveu (senão "1-2 frases" cortaria o roteiro dele pela metade).
+// `hasGuide` troca a regra de tamanho (acompanha o roteiro) E a regra de
+// abertura: toque com roteiro do operador PODE abrir com o nome (é o próprio
+// operador pedindo isso — ver guideBlock), a regra de "nunca abrir com nome"
+// só vale pro ângulo automático (sem roteiro), onde ela existe pra não repetir
+// saudação idêntica em toques seguidos.
 const cadenceTomBlock = (hasGuide = false) => `TOM:
 - VARIE A ESTRUTURA a cada toque. É PROIBIDO usar sempre o mesmo formato "frase de empatia sobre a correria + quebra de linha + pergunta" — foi exatamente isso que entregou que era bot nas mensagens anteriores. Às vezes vá direto ao ponto sem quebra-gelo nenhum; às vezes faça só uma afirmação curta; às vezes uma pergunta sozinha.
 - PROIBIDO reciclar variações de "imagino a correria", "sei que a rotina aperta", "a correria não para" — essas já foram usadas à exaustão.
 - Escreva como alguém mandando um zap de verdade, não um script de vendas. Sem "Olá! Tudo bem?" genérico.
-- PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.
+- ${hasGuide
+  ? 'Pode abrir a mensagem com o nome dela (ex.: "Ane, ...") quando soar natural — não é obrigatório, mas não é proibido aqui.'
+  : 'PROIBIDO abrir a mensagem com "Oi, [nome]" (com ou sem emoji) — isso entrega na cara que é IA quando repete em toques seguidos. Vá direto pro assunto, ou use o nome só no meio/fim da frase, se soar natural, nunca como saudação de abertura.'}
 - Trate por "vc", nunca "você" por extenso.
 - SEM EMOJIS — nenhum, em nenhuma hipótese.
 - ${hasGuide
@@ -743,15 +748,24 @@ export class SdrFollowupService {
    * Substitui o ângulo automático inteiro (e a proibição de assunto que vem com
    * ele): quem define o conteúdo passa a ser o texto do operador — instrução
    * concorrente é justamente o que fazia os toques saírem iguais antes.
+   * `hasReplies` liga a personalização por histórico: só puxa detalhe concreto
+   * da conversa quando ela existe de verdade, senão a IA "personaliza" em cima
+   * de nada e inventa contexto que nunca aconteceu.
    */
-  private guideBlock(stepIndex: number, guide: string): string {
+  private guideBlock(stepIndex: number, guide: string, hasReplies: boolean): string {
+    const personalizacao = hasReplies
+      ? `PERSONALIZAÇÃO: releia o histórico da conversa antes de escrever. Se ela mencionou algo concreto (nome da empresa, uma dificuldade específica, uma cidade, um número, uma frase dela) puxe ESSE detalhe na mensagem pra conectar com o assunto do roteiro — não fale em genérico ("sua empresa") quando dá pra ser específico. Se nada do histórico se conecta com o assunto do roteiro, tudo bem, siga só o roteiro sem forçar conexão.`
+      : `PERSONALIZAÇÃO: ela nunca respondeu nada, não existe histórico real pra puxar detalhe — NÃO invente informação sobre ela (nome de empresa, situação, o que ela "disse"). Personalize só pelo nome dela, siga o roteiro.`;
+
     return `ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA E ELE TEM ROTEIRO PRÓPRIO, escrito pelo operador:
 
 """
 ${guide}
 """
 
-Esse roteiro define O QUE dizer neste toque — o assunto, a intenção e a pergunta são os dele, e nenhum outro. NÃO copie o texto palavra por palavra: reescreva com as suas palavras, no seu tom, encaixando no que já foi conversado com ela (use o nome/contexto dela quando fizer sentido). Se o roteiro citar algo que já foi resolvido na conversa, adapte em vez de repetir.`;
+Esse roteiro define O QUE dizer neste toque — o assunto, a intenção e a pergunta são os dele, e nenhum outro. NÃO copie o texto palavra por palavra: reescreva com as suas palavras, no seu tom. Pode (e deve, se o roteiro citar o nome) abrir a mensagem com o nome dela — isso é diferente da regra padrão de não abrir com "Oi, [nome]", que não vale pra este toque.
+
+${personalizacao}`;
   }
 
   private antiRepeatBlock(history: OpenAI.Chat.ChatCompletionMessageParam[]): string {
@@ -876,9 +890,10 @@ ${tomBlock}`;
       const contexto = `CONTEXTO: você mandou a abertura pra ela apresentando a Clara e perguntando se ela já é dona do próprio schedule ou ainda trabalha como helper, mas faz ${hours} e ela não respondeu essa pergunta (ou a mensagem que ela mandou não deixou isso claro).`;
 
       const angle = EARLY_STAGE_ANGLES[Math.min(stepIndex, EARLY_STAGE_ANGLES.length - 1)];
+      const hasReplies = history.some((h) => h.role === 'user');
 
       const miolo = guide
-        ? this.guideBlock(stepIndex, guide)
+        ? this.guideBlock(stepIndex, guide, hasReplies)
         : `PROIBIDO nesta mensagem: falar de horários, agenda ou Sessão de Mentoria — isso só vem DEPOIS que ela responder a pergunta única, e ela ainda não respondeu.
 
 ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}`;
@@ -934,9 +949,10 @@ ${cadenceTomBlock(!!guide)}`;
 NUNCA repita a lista de horários inteira de novo — se ela pedir, você mostra na próxima resposta (fora deste follow-up).`;
 
       const angle = SCHEDULE_REMINDER_ANGLES[Math.min(stepIndex, SCHEDULE_REMINDER_ANGLES.length - 1)];
+      const hasReplies = history.some((h) => h.role === 'user');
 
       const miolo = guide
-        ? this.guideBlock(stepIndex, guide)
+        ? this.guideBlock(stepIndex, guide, hasReplies)
         : `ESTE É O TOQUE ${stepIndex + 1} DA CADÊNCIA. ${angle}`;
 
       const instruction = `${contexto}

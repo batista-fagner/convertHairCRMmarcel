@@ -7,6 +7,7 @@ import { firstValueFrom } from 'rxjs';
 import { Lead } from '../common/entities/lead.entity';
 import { BulkCampaign } from '../common/entities/bulk-campaign.entity';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { SdrFollowupService } from '../sdr/sdr-followup.service';
 
 export type RecipientFilter = 'imported' | 'never-contacted' | 'all';
 
@@ -42,6 +43,7 @@ export class BulkMessageService {
     private leadsRepo: Repository<Lead>,
     @InjectRepository(BulkCampaign)
     private campaignRepo: Repository<BulkCampaign>,
+    private sdrFollowup: SdrFollowupService,
   ) {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || '';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
@@ -138,6 +140,11 @@ export class BulkMessageService {
         waLastMessageAt: now,
         waStage: lead.waStage || ('abertura' as any),
       });
+      // Igual à abertura proativa (ver sdr.controller.ts): quem foi contatado
+      // por nós entra na cadência de follow-up mesmo que nunca responda —
+      // senão o lead fica pra sempre sem próximo toque agendado (nurture_step
+      // nunca sai de 0 porque resetCadenceOnReply só rodava em resposta real).
+      await this.sdrFollowup.resetCadenceOnReply(lead.id);
       const fresh = await this.leadsRepo.findOne({ where: { id: lead.id } });
       if (fresh) this.realtime.emitLeadUpdated(fresh);
     }
