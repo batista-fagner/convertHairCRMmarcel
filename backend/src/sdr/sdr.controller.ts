@@ -468,6 +468,12 @@ export class SdrController {
     if (!lead) return;
     const ctx = [...(Array.isArray(lead.aiContext) ? lead.aiContext : []), { role: 'assistant', source: 'operator', content: text, timestamp: new Date().toISOString() }];
     const updated = await this.leadsService.update(lead.id, { aiContext: ctx, waLastMessageAt: new Date() });
+    // Mesmo caso do sendProactiveOpening/bulk-message: quem foi contatado por
+    // nós (mesmo manualmente) precisa entrar na cadência de follow-up, senão
+    // fica pra sempre sem próximo toque agendado (ver leads Ledslane/Leka —
+    // next_nurture_at nunca era setado porque resetCadenceOnReply só rodava
+    // em resposta REAL do lead).
+    await this.sdrFollowup.resetCadenceOnReply(lead.id);
     this.realtime.emitLeadUpdated(updated);
     this.logger.log(`[SDR] Resposta manual do closer registrada para o lead ${updated.phone}`);
   }

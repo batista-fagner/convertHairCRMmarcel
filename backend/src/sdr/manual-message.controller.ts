@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { firstValueFrom } from 'rxjs';
 import { Lead } from '../common/entities/lead.entity';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { SdrFollowupService } from './sdr-followup.service';
 
 type MediaType = 'image' | 'video' | 'document' | 'audio';
 
@@ -30,6 +31,7 @@ export class ManualMessageController {
     private http: HttpService,
     private config: ConfigService,
     private realtime: RealtimeGateway,
+    private sdrFollowup: SdrFollowupService,
   ) {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || '';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
@@ -65,6 +67,11 @@ export class ManualMessageController {
       aiContext: [...ctx, entry],
       waLastMessageAt: new Date(),
     });
+
+    // Igual ao sendProactiveOpening/bulk-message: envio manual pelo operador
+    // também precisa agendar o próximo toque da cadência, senão o lead fica
+    // pra sempre sem next_nurture_at (ver leads Ledslane/Leka, 2026-08-16).
+    await this.sdrFollowup.resetCadenceOnReply(id);
 
     const fresh = await this.leadsRepo.findOne({ where: { id } });
     if (fresh) this.realtime.emitLeadUpdated(fresh);
