@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { firstValueFrom } from 'rxjs';
 import { Appointment, AppointmentStatus } from '../common/entities/appointment.entity';
+import { Lead } from '../common/entities/lead.entity';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 export interface CreateAppointmentDto {
   leadId?: string | null;
@@ -40,9 +42,12 @@ export class AppointmentsService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(Appointment)
     private readonly repo: Repository<Appointment>,
+    @InjectRepository(Lead)
+    private readonly leadsRepo: Repository<Lead>,
     private readonly http: HttpService,
     private readonly config: ConfigService,
     private readonly schedulerRegistry: SchedulerRegistry,
+    private readonly realtime: RealtimeGateway,
   ) {
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || 'https://free.uazapi.com';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
@@ -117,10 +122,26 @@ export class AppointmentsService implements OnApplicationBootstrap {
     const ok = await this.sendWhatsapp(appt.clientPhone, text);
     if (ok) {
       await this.markReminderSent(appt.id);
+      await this.recordReminderInLeadHistory(appt, text);
       this.logger.log(`[AGENDA] Lembrete de 1h enviado pra ${appt.clientPhone} (agendamento ${appt.id})`);
     } else {
       this.logger.error(`[AGENDA] Falha ao enviar lembrete pra ${appt.clientPhone} (agendamento ${appt.id})`);
     }
+  }
+
+  /** Grava o lembrete no aiContext do lead — senão o WhatsApp é enviado mas some do Kanban/Inbox do CRM. */
+  private async recordReminderInLeadHistory(appt: Appointment, text: string): Promise<void> {
+    const lead = appt.leadId
+      ? await this.leadsRepo.findOne({ where: { id: appt.leadId } })
+      : await this.leadsRepo.findOne({ where: { phone: appt.clientPhone! } });
+    if (!lead) return;
+
+    const ctx = Array.isArray(lead.aiContext) ? lead.aiContext : [];
+    const entry = { role: 'assistant', source: 'reminder', content: text, timestamp: new Date().toISOString() };
+    await this.leadsRepo.update(lead.id, { aiContext: [...ctx, entry], waLastMessageAt: new Date() });
+
+    const fresh = await this.leadsRepo.findOne({ where: { id: lead.id } });
+    if (fresh) this.realtime.emitLeadUpdated(fresh);
   }
 
   private async sendWhatsapp(phone: string, text: string): Promise<boolean> {
