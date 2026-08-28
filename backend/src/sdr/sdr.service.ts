@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { Lead, KanbanStage, LeadTemperature } from '../common/entities/lead.entity';
 import { SettingsService } from '../settings/settings.service';
-import { SDR_JSON_FORMAT, SDR_MODEL_KEY } from './sdr.prompt';
+import { SDR_JSON_FORMAT } from './sdr.prompt';
 
 export type SdrStage = 'abertura' | 'qualificacao' | 'quente' | 'frio' | 'perdido' | 'encerrado';
 
@@ -71,16 +70,8 @@ export function deriveKanbanStage(
 @Injectable()
 export class SdrService {
   private readonly logger = new Logger(SdrService.name);
-  private readonly openai: OpenAI;
-  private readonly model: string;
 
-  constructor(
-    private config: ConfigService,
-    private settings: SettingsService,
-  ) {
-    this.openai = new OpenAI({ apiKey: config.get('OPENAI_API_KEY') });
-    this.model = config.get('SDR_OPENAI_MODEL') || 'gpt-5.4-mini';
-  }
+  constructor(private settings: SettingsService) {}
 
   async processMessage(lead: Lead, incomingText: string, availabilityBlock?: string): Promise<SdrResponse> {
     // Sanitiza roles inválidos de versões anteriores (ex.: 'lead', 'gabi')
@@ -90,9 +81,10 @@ export class SdrService {
       content: m.content ?? '',
     }));
 
-    // Carrega o prompt e o modelo configurados em Configurações
+    // Carrega o prompt e o client/modelo configurados em Configurações (cai
+    // pro client padrão da plataforma se o operador não configurou chave própria)
     const basePrompt = await this.settings.getSdrPrompt();
-    const model = (await this.settings.get(SDR_MODEL_KEY)) || this.model;
+    const { client, model } = await this.settings.getAiClient();
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: buildSystemPrompt(basePrompt, lead, availabilityBlock) },
@@ -101,7 +93,7 @@ export class SdrService {
     ];
 
     try {
-      const response = await this.openai.chat.completions.create({
+      const response = await client.chat.completions.create({
         model,
         messages,
         temperature: 0.7,

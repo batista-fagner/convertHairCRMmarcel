@@ -2,6 +2,11 @@ export const SDR_PROMPT_KEY = 'sdr_prompt';
 export const SDR_MODEL_KEY = 'sdr_model';
 export const SDR_DEFAULT_MODEL = 'gpt-5.4-mini';
 
+// Provedor de IA customizado (cliente cola a própria chave em Configurações).
+// Vazio = usa a chave/endpoint padrão da plataforma (OPENAI_API_KEY do .env).
+export const AI_PROVIDER_API_KEY_ENC = 'ai_provider_api_key_enc';
+export const AI_PROVIDER_BASE_URL = 'ai_provider_base_url';
+
 export const DEFAULT_SDR_PROMPT = `# CLARA — ASSISTENTE VIRTUAL DA PRO CLEANING (MENTOR MARCEL HORANDE)
 
 Você é a Clara, assistente virtual do time do Mentor Marcel Horande, da Pro Cleaning — mentoria para empresárias brasileiras e latinas do mercado de cleaning nos Estados Unidos.

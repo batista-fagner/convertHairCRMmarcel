@@ -187,60 +187,225 @@ function ChatSimulator() {
   )
 }
 
-const MODELS = [
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Mais rápido e barato' },
-  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Mais preciso e contextual' },
+const AI_PROVIDER_PRESETS = [
+  {
+    label: 'OpenAI (padrão)',
+    baseUrl: '',
+    models: ['gpt-5.4-mini', 'gpt-4.1-mini', 'gpt-4o-mini', 'gpt-4o'],
+  },
+  {
+    label: 'Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+  },
+  {
+    label: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  },
+  {
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-sonnet', 'meta-llama/llama-3.3-70b-instruct', 'google/gemini-2.5-flash'],
+  },
 ]
 
-function ModelSelector() {
-  const [model, setModel] = useState('gpt-5.4-mini')
+// Modelos do provedor cuja base URL bate com a selecionada — [] quando é uma
+// base URL customizada que não corresponde a nenhum preset conhecido.
+function modelsForBaseUrl(baseUrl) {
+  return AI_PROVIDER_PRESETS.find(p => p.baseUrl === (baseUrl || ''))?.models ?? []
+}
+
+function AiProviderConfig() {
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [model, setModel] = useState('')
+  const [apiKeySet, setApiKeySet] = useState(false)
+  const [apiKeyPreview, setApiKeyPreview] = useState('')
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    fetch(`${API}/settings/sdr-model`)
+  const load = () => {
+    setLoading(true)
+    fetch(`${API}/settings/ai-provider`)
       .then(r => r.json())
-      .then(d => setModel(d.value || 'gpt-5.4-mini'))
-      .catch(() => {})
-  }, [])
-
-  const select = async (val) => {
-    setModel(val)
-    setSaving(true)
-    setSaved(false)
-    try {
-      await fetch(`${API}/settings/sdr-model`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: val }),
+      .then(d => {
+        setBaseUrl(d.baseUrl || '')
+        setModel(d.model || '')
+        setApiKeySet(!!d.apiKeySet)
+        setApiKeyPreview(d.apiKeyPreview || '')
       })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    } catch {}
-    finally { setSaving(false) }
+      .catch(() => setError('Não foi possível carregar a configuração.'))
+      .finally(() => setLoading(false))
   }
 
+  useEffect(() => { load() }, [])
+
+  const save = async () => {
+    setSaving(true); setSaved(false); setError('')
+    try {
+      const res = await fetch(`${API}/settings/ai-provider`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: apiKey || undefined, baseUrl, model }),
+      })
+      if (!res.ok) throw new Error('Erro ao salvar')
+      const d = await res.json()
+      setApiKey('')
+      setBaseUrl(d.baseUrl || '')
+      setModel(d.model || '')
+      setApiKeySet(!!d.apiKeySet)
+      setApiKeyPreview(d.apiKeyPreview || '')
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const clearKey = async () => {
+    if (!confirm('Remover a chave configurada? A IA volta a usar a chave padrão da plataforma.')) return
+    setSaving(true); setError('')
+    try {
+      const res = await fetch(`${API}/settings/ai-provider`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearApiKey: true, baseUrl: '' }),
+      })
+      const d = await res.json()
+      setApiKey('')
+      setBaseUrl(d.baseUrl || '')
+      setModel(d.model || '')
+      setApiKeySet(!!d.apiKeySet)
+      setApiKeyPreview(d.apiKeyPreview || '')
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Sempre troca o modelo junto com o preset (mesmo se já tinha um valor) —
+  // trocar de provedor com o modelo antigo esquecido é exatamente o que gera
+  // "model_not_found" (ex.: ficar com "gpt-5.4-mini" depois de escolher Gemini).
+  const applyPreset = (preset) => {
+    setBaseUrl(preset.baseUrl)
+    setModel(preset.models[0])
+  }
+
+  const activeModels = modelsForBaseUrl(baseUrl)
+
   return (
-    <div className="flex items-center gap-3 mb-4">
-      <span className="text-xs text-slate-500 font-medium shrink-0">Modelo de IA:</span>
-      <div className="flex gap-2">
-        {MODELS.map(m => (
-          <button
-            key={m.value}
-            onClick={() => select(m.value)}
-            disabled={saving}
-            title={m.description}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
-              model === m.value
-                ? 'bg-violet-600 text-white border-violet-600'
-                : 'bg-white text-slate-600 border-slate-200 hover:border-violet-400 hover:text-violet-600'
-            }`}
-          >
-            {m.label}
-          </button>
-        ))}
+    <div className="mb-6 bg-white rounded-xl border border-slate-200 p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Key className="w-4 h-4 text-violet-600" />
+        <p className="font-semibold text-slate-800 text-sm">Provedor de IA (Clara)</p>
+        {apiKeySet ? (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Chave própria configurada</span>
+        ) : (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">Usando chave padrão da plataforma</span>
+        )}
       </div>
-      {saved && <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium"><CheckCircle2 className="w-3.5 h-3.5" /> Salvo</span>}
+      <p className="text-xs text-slate-400 mb-4">
+        Por padrão a Clara usa a chave OpenAI da plataforma. Se preferir, cole aqui a chave de outro provedor compatível com a API da OpenAI (OpenAI, Gemini, Groq, DeepSeek, OpenRouter) para usar sua própria conta/cobrança. A chave é guardada criptografada e nunca é exibida de novo — só uma prévia mascarada.
+      </p>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-6 text-slate-400">
+          <Loader2 className="w-5 h-5 animate-spin" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {AI_PROVIDER_PRESETS.map(p => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => applyPreset(p)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                  baseUrl === p.baseUrl ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-400 hover:text-violet-600'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Chave de API</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder={apiKeySet ? `Configurada (${apiKeyPreview}) — digite pra trocar` : 'Cole a chave de API aqui'}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              // Não é campo de login — autoComplete="off" sozinho não impede o Chrome
+              // de sugerir uma senha salva num <input type="password"> vazio (visto na
+              // prática: preencheu a senha de login do próprio admin aqui). "new-password"
+              // é o valor que os navegadores realmente respeitam pra não autopreencher.
+              autoComplete="new-password"
+              name="convertcrm-ai-provider-secret"
+              data-lpignore="true"
+              data-1p-ignore="true"
+            />
+          </div>
+
+          {/* Base URL não é exposta na tela — cada preset acima já carrega a
+              base URL certa dentro do código (AI_PROVIDER_PRESETS). O operador
+              só escolhe provedor + modelo; não precisa saber o que é uma base URL. */}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Modelo</label>
+            {activeModels.length > 0 ? (
+              <select
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+              >
+                {/* Cobre o caso raro de um modelo salvo antigo que não está mais na lista — não some do select. */}
+                {!activeModels.includes(model) && model && <option value={model}>{model} (atual)</option>}
+                {activeModels.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            ) : (
+              <input
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                placeholder="gpt-5.4-mini"
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            {error && <span className="text-xs text-red-600 font-medium">{error}</span>}
+            {saved && (
+              <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                <CheckCircle2 className="w-4 h-4" /> Salvo
+              </span>
+            )}
+            {apiKeySet && (
+              <button
+                onClick={clearKey}
+                disabled={saving}
+                className="flex items-center gap-1.5 text-xs font-medium text-red-500 hover:text-red-600 disabled:opacity-50 px-3 py-2 transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Remover chave
+              </button>
+            )}
+            <button
+              onClick={save}
+              disabled={saving}
+              className="flex items-center gap-1.5 text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-4 py-2 rounded-lg transition"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Salvar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -300,7 +465,6 @@ function SdrPromptEditor() {
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">Padrão</span>
           )}
         </div>
-        <ModelSelector />
       </div>
 
       {/* Split layout — responsivo */}
@@ -2343,6 +2507,8 @@ export default function Settings() {
       </div>
 
       <SdrPromptEditor />
+
+      <AiProviderConfig />
 
       <IgCatchallEditor />
 

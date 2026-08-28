@@ -12,7 +12,6 @@ import { FollowupVideo } from '../common/entities/followup-video.entity';
 import { Appointment } from '../common/entities/appointment.entity';
 import { SettingsService } from '../settings/settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { SDR_MODEL_KEY } from './sdr.prompt';
 
 // Chaves da config global antiga (1 regra só) — usadas só pra migração automática
 // pra 1ª FollowupRule na primeira vez que o sistema roda com a tabela vazia.
@@ -138,7 +137,6 @@ export { EARLY_STAGE_ANGLES, SCHEDULE_REMINDER_ANGLES, cadenceTomBlock };
 @Injectable()
 export class SdrFollowupService {
   private readonly logger = new Logger(SdrFollowupService.name);
-  private readonly openai: OpenAI;
   private readonly uazapiBaseUrl: string;
   private readonly uazapiToken: string;
   private rulesSeeded = false;
@@ -169,7 +167,6 @@ export class SdrFollowupService {
     private config: ConfigService,
     private realtime: RealtimeGateway,
   ) {
-    this.openai = new OpenAI({ apiKey: config.get('OPENAI_API_KEY') });
     this.uazapiBaseUrl = config.get('SDR_UAZAPI_BASE_URL') || config.get('UAZAPI_BASE_URL') || '';
     this.uazapiToken = config.get('SDR_UAZAPI_TOKEN') || '';
   }
@@ -788,7 +785,7 @@ ${personalizacao}`;
   private async generateAiFollowup(lead: Lead, delayMinutes: number): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
-      const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
+      const { client, model } = await this.settings.getAiClient();
 
       const history: OpenAI.Chat.ChatCompletionMessageParam[] = (Array.isArray(lead.aiContext) ? lead.aiContext : []).map((m) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -849,7 +846,7 @@ ${tomBlock}`;
       // colada no system prompt lá no início — testado que, colada no início, o modelo
       // ignora e volta pro fluxo de qualificação padrão (instrução fica "afogada" pelo
       // prompt longo). Perto do ponto de geração, a instrução é seguida de verdade.
-      const response = await this.openai.chat.completions.create({
+      const response = await client.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: basePrompt },
@@ -878,7 +875,7 @@ ${tomBlock}`;
   private async generateEarlyStageFollowup(lead: Lead, delayMinutes: number, stepIndex = 0, guide = ''): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
-      const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
+      const { client, model } = await this.settings.getAiClient();
 
       const history: OpenAI.Chat.ChatCompletionMessageParam[] = (Array.isArray(lead.aiContext) ? lead.aiContext : []).map((m) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -904,7 +901,7 @@ ${miolo}${this.antiRepeatBlock(history)}
 
 ${cadenceTomBlock(!!guide)}`;
 
-      const response = await this.openai.chat.completions.create({
+      const response = await client.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: basePrompt },
@@ -935,7 +932,7 @@ ${cadenceTomBlock(!!guide)}`;
   private async generateScheduleReminderFollowup(lead: Lead, delayMinutes: number, stepIndex = 0, guide = ''): Promise<string> {
     try {
       const basePrompt = await this.settings.getSdrPrompt();
-      const model = (await this.settings.get(SDR_MODEL_KEY)) || 'gpt-5.4-mini';
+      const { client, model } = await this.settings.getAiClient();
 
       const history: OpenAI.Chat.ChatCompletionMessageParam[] = (Array.isArray(lead.aiContext) ? lead.aiContext : []).map((m) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -961,7 +958,7 @@ ${miolo}${this.antiRepeatBlock(history)}
 
 ${cadenceTomBlock(!!guide)}`;
 
-      const response = await this.openai.chat.completions.create({
+      const response = await client.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: basePrompt },

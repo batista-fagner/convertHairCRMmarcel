@@ -4,8 +4,17 @@ import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { Setting } from './setting.entity';
-import { SDR_PROMPT_KEY, DEFAULT_SDR_PROMPT, SDR_JSON_FORMAT, SDR_MODEL_KEY, SDR_DEFAULT_MODEL } from '../sdr/sdr.prompt';
+import {
+  SDR_PROMPT_KEY,
+  DEFAULT_SDR_PROMPT,
+  SDR_JSON_FORMAT,
+  SDR_MODEL_KEY,
+  SDR_DEFAULT_MODEL,
+  AI_PROVIDER_API_KEY_ENC,
+  AI_PROVIDER_BASE_URL,
+} from '../sdr/sdr.prompt';
 import { AvailabilityService } from '../availability/availability.service';
+import { encryptSecret, decryptSecret, maskSecretPreview } from '../common/crypto.util';
 
 @Injectable()
 export class SettingsService {
@@ -39,6 +48,63 @@ export class SettingsService {
   }
 
   /**
+   * Fonte única do client OpenAI-compatível usado pra chamar a IA (Clara).
+   * Se o cliente configurou a própria chave em Configurações → Provedor de IA,
+   * usa ela (e o baseURL dele, se veio algum) — senão cai pro client padrão
+   * da plataforma (OPENAI_API_KEY do .env). Nunca cacheia o client entre
+   * chamadas: a chave pode ter sido trocada na tela sem reiniciar o backend.
+   */
+  async getAiClient(): Promise<{ client: OpenAI; model: string }> {
+    const [encKey, baseUrl, model] = await Promise.all([
+      this.get(AI_PROVIDER_API_KEY_ENC),
+      this.get(AI_PROVIDER_BASE_URL),
+      this.get(SDR_MODEL_KEY),
+    ]);
+
+    if (encKey) {
+      const apiKey = decryptSecret(encKey);
+      return {
+        client: new OpenAI({ apiKey, baseURL: baseUrl || undefined }),
+        model: model || SDR_DEFAULT_MODEL,
+      };
+    }
+    return { client: this.openai, model: model || this.model };
+  }
+
+  async getAiProviderConfig(): Promise<{ baseUrl: string; model: string; apiKeySet: boolean; apiKeyPreview: string }> {
+    const [encKey, baseUrl, model] = await Promise.all([
+      this.get(AI_PROVIDER_API_KEY_ENC),
+      this.get(AI_PROVIDER_BASE_URL),
+      this.get(SDR_MODEL_KEY),
+    ]);
+    return {
+      baseUrl: baseUrl ?? '',
+      model: model ?? SDR_DEFAULT_MODEL,
+      apiKeySet: !!encKey,
+      apiKeyPreview: encKey ? maskSecretPreview(decryptSecret(encKey)) : '',
+    };
+  }
+
+  async setAiProviderConfig(body: { apiKey?: string; baseUrl?: string; model?: string; clearApiKey?: boolean }) {
+    // Campo de chave vazio no formulário = manter a que já está salva. Só
+    // `clearApiKey` explícito remove e volta pro client padrão da plataforma —
+    // nesse caso também reseta o modelo pro default: senão sobra um modelo de
+    // outro provedor (ex.: "gemini-2.5-flash") configurado junto com a chave
+    // OpenAI da plataforma, e toda chamada quebra com model_not_found.
+    if (body.clearApiKey) {
+      await this.settingsRepo.delete({ key: AI_PROVIDER_API_KEY_ENC });
+      if (typeof body.model !== 'string' || !body.model.trim()) {
+        await this.set(SDR_MODEL_KEY, SDR_DEFAULT_MODEL);
+      }
+    } else if (typeof body.apiKey === 'string' && body.apiKey.trim()) {
+      await this.set(AI_PROVIDER_API_KEY_ENC, encryptSecret(body.apiKey.trim()));
+    }
+    if (typeof body.baseUrl === 'string') await this.set(AI_PROVIDER_BASE_URL, body.baseUrl.trim());
+    if (typeof body.model === 'string' && body.model.trim()) await this.set(SDR_MODEL_KEY, body.model.trim());
+    return this.getAiProviderConfig();
+  }
+
+  /**
    * Fonte única do prompt da Sofia. Com SDR_PROMPT_FORCE_CODE=true (só local/dev,
    * nunca setar em produção), ignora o que está salvo em settings.sdr_prompt e usa
    * sempre o DEFAULT_SDR_PROMPT do código — assim dá pra testar um prompt novo sem
@@ -51,7 +117,7 @@ export class SettingsService {
 
   async simulate(message: string, history: { role: 'user' | 'assistant'; content: string }[]) {
     const basePrompt = await this.getSdrPrompt();
-    const model = (await this.get(SDR_MODEL_KEY)) || this.model;
+    const { client, model } = await this.getAiClient();
     const availability = await this.availabilityService.buildAvailabilityBlock();
     const systemPrompt = `${basePrompt}\n\n# HORÁRIOS DISPONÍVEIS (agenda real do Marcel, atualizada agora)\n${availability.text}\n\n${SDR_JSON_FORMAT}`;
 
@@ -61,7 +127,7 @@ export class SettingsService {
       { role: 'user', content: message },
     ];
 
-    const response = await this.openai.chat.completions.create({
+    const response = await client.chat.completions.create({
       model,
       messages,
       temperature: 0.7,

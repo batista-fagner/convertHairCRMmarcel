@@ -34,6 +34,20 @@ export class SettingsController {
     return { value: model };
   }
 
+  // Provedor de IA customizado — o cliente cola a própria chave (de qualquer
+  // provedor compatível com a API da OpenAI: OpenAI, Gemini, Groq, DeepSeek,
+  // OpenRouter etc.). A chave nunca volta pro frontend inteira, só uma prévia
+  // mascarada + se está configurada ou não.
+  @Get('ai-provider')
+  async getAiProvider() {
+    return this.settingsService.getAiProviderConfig();
+  }
+
+  @Put('ai-provider')
+  async setAiProvider(@Body() body: { apiKey?: string; baseUrl?: string; model?: string; clearApiKey?: boolean }) {
+    return this.settingsService.setAiProviderConfig(body);
+  }
+
   @Post('sdr-simulate')
   async simulate(@Body() body: { message: string; history: { role: 'user' | 'assistant'; content: string }[] }) {
     return this.settingsService.simulate(body.message ?? '', body.history ?? []);
