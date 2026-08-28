@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Body } from '@nestjs/common';
+import { Controller, Get, Put, Post, Body, BadRequestException } from '@nestjs/common';
 import { SettingsService } from './settings.service';
 import { SDR_PROMPT_KEY, DEFAULT_SDR_PROMPT, SDR_MODEL_KEY, SDR_DEFAULT_MODEL } from '../sdr/sdr.prompt';
 import { SDR_NOTIFY_PHONES_KEY } from '../sdr/sdr.controller';
@@ -50,7 +50,11 @@ export class SettingsController {
 
   @Post('sdr-simulate')
   async simulate(@Body() body: { message: string; history: { role: 'user' | 'assistant'; content: string }[] }) {
-    return this.settingsService.simulate(body.message ?? '', body.history ?? []);
+    try {
+      return await this.settingsService.simulate(body.message ?? '', body.history ?? []);
+    } catch (err: any) {
+      throw new BadRequestException(err.message);
+    }
   }
 
   @Get('sdr-notify')

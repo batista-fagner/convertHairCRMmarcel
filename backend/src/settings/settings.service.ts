@@ -18,8 +18,6 @@ import { encryptSecret, decryptSecret, maskSecretPreview } from '../common/crypt
 
 @Injectable()
 export class SettingsService {
-  private readonly openai: OpenAI;
-  private readonly model: string;
   private readonly forceCodePrompt: boolean;
 
   constructor(
@@ -28,8 +26,6 @@ export class SettingsService {
     private config: ConfigService,
     private availabilityService: AvailabilityService,
   ) {
-    this.openai = new OpenAI({ apiKey: config.get('OPENAI_API_KEY') });
-    this.model = config.get('SDR_OPENAI_MODEL') || 'gpt-5.4-mini';
     this.forceCodePrompt = config.get('SDR_PROMPT_FORCE_CODE') === 'true';
   }
 
@@ -49,10 +45,12 @@ export class SettingsService {
 
   /**
    * Fonte única do client OpenAI-compatível usado pra chamar a IA (Clara).
-   * Se o cliente configurou a própria chave em Configurações → Provedor de IA,
-   * usa ela (e o baseURL dele, se veio algum) — senão cai pro client padrão
-   * da plataforma (OPENAI_API_KEY do .env). Nunca cacheia o client entre
-   * chamadas: a chave pode ter sido trocada na tela sem reiniciar o backend.
+   * Só funciona com a chave que o próprio cliente configurou em
+   * Configurações → Provedor de IA — não existe fallback pra chave padrão da
+   * plataforma (decisão explícita: cada cliente paga pelo próprio consumo).
+   * Sem chave configurada, lança erro — quem chama decide como avisar/tratar.
+   * Nunca cacheia o client entre chamadas: a chave pode ter sido trocada na
+   * tela sem reiniciar o backend.
    */
   async getAiClient(): Promise<{ client: OpenAI; model: string }> {
     const [encKey, baseUrl, model] = await Promise.all([
@@ -61,14 +59,15 @@ export class SettingsService {
       this.get(SDR_MODEL_KEY),
     ]);
 
-    if (encKey) {
-      const apiKey = decryptSecret(encKey);
-      return {
-        client: new OpenAI({ apiKey, baseURL: baseUrl || undefined }),
-        model: model || SDR_DEFAULT_MODEL,
-      };
+    if (!encKey) {
+      throw new Error('Nenhuma chave de IA configurada em Configurações → Provedor de IA');
     }
-    return { client: this.openai, model: model || this.model };
+
+    const apiKey = decryptSecret(encKey);
+    return {
+      client: new OpenAI({ apiKey, baseURL: baseUrl || undefined }),
+      model: model || SDR_DEFAULT_MODEL,
+    };
   }
 
   async getAiProviderConfig(): Promise<{ baseUrl: string; model: string; apiKeySet: boolean; apiKeyPreview: string }> {

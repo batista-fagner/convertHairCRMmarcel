@@ -81,18 +81,19 @@ export class SdrService {
       content: m.content ?? '',
     }));
 
-    // Carrega o prompt e o client/modelo configurados em Configurações (cai
-    // pro client padrão da plataforma se o operador não configurou chave própria)
-    const basePrompt = await this.settings.getSdrPrompt();
-    const { client, model } = await this.settings.getAiClient();
-
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: buildSystemPrompt(basePrompt, lead, availabilityBlock) },
-      ...history,
-      { role: 'user', content: incomingText },
-    ];
-
     try {
+      // Carrega o prompt e o client/modelo configurados em Configurações — sem
+      // chave própria configurada em Configurações → Provedor de IA, getAiClient()
+      // lança e cai no catch abaixo (sem fallback pra chave da plataforma).
+      const basePrompt = await this.settings.getSdrPrompt();
+      const { client, model } = await this.settings.getAiClient();
+
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: buildSystemPrompt(basePrompt, lead, availabilityBlock) },
+        ...history,
+        { role: 'user', content: incomingText },
+      ];
+
       const response = await client.chat.completions.create({
         model,
         messages,
