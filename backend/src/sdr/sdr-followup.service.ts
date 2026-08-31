@@ -593,20 +593,25 @@ export class SdrFollowupService {
         continue;
       }
 
-      // Claim atômico: só segue quem conseguiu mover nextNurtureAt nesta execução
-      // (evita disparo duplicado se o cron se sobrepuser).
+      // Claim atômico: trava o lead movendo nextNurtureAt pra um valor de
+      // "em processamento" (10min à frente) — evita 2 execuções do cron
+      // pegarem o mesmo lead. NÃO mexe em nurtureStep ainda: antes, o passo
+      // já era avançado (e o próximo toque já agendado) ANTES de saber se a
+      // mensagem seria gerada com sucesso — uma falha da IA (ex.: Gemini
+      // estourando o budget de "thinking", ver fix em sdr.service.ts) fazia o
+      // toque "sumir" silenciosamente sem enviar nada, e o mesmo já tinha
+      // acontecido antes com modelo OpenAI de raciocínio. Achado real: lead
+      // Viviane (407-448-0869) tinha nurture_step=5 mas só 2 mensagens de
+      // cadência de verdade no histórico — 3 toques perdidos assim.
+      const claimLockUntil = new Date(Date.now() + 10 * 60_000);
       const claim = await this.leadsRepo
         .createQueryBuilder()
         .update(Lead)
-        .set({ nurtureStep: stepIndex + 1 })
+        .set({ nextNurtureAt: claimLockUntil })
         .where('id = :id', { id: lead.id })
         .andWhere('next_nurture_at = :expected', { expected: lead.nextNurtureAt })
         .execute();
       if (!claim.affected) continue;
-
-      const nextOffset = steps[stepIndex + 1];
-      const nextNurtureAt = nextOffset != null ? new Date(Date.now() + nextOffset * 60_000) : null;
-      await this.leadsRepo.update(lead.id, { nextNurtureAt });
 
       // Só faz sentido perguntar "já viu os horários?" pra quem já respondeu a
       // pergunta única (Clara só mostra a agenda depois disso) — donaDeSchedule
@@ -619,13 +624,34 @@ export class SdrFollowupService {
       const message = lead.donaDeSchedule == null
         ? await this.generateEarlyStageFollowup(lead, offsetMinutes, stepIndex, guide)
         : await this.generateScheduleReminderFollowup(lead, offsetMinutes, stepIndex, guide);
-      if (!message) continue;
+
+      if (!message) {
+        // Geração falhou — devolve pro mesmo passo, tenta de novo em 5min em
+        // vez de avançar sem ter enviado nada.
+        await this.leadsRepo.update(lead.id, { nextNurtureAt: new Date(Date.now() + 5 * 60_000) });
+        this.logger.warn(`[CADENCE] Falha ao gerar toque ${stepIndex + 1} pra ${lead.phone} — tenta de novo em 5min`);
+        continue;
+      }
 
       if (sent > 0) {
         await this.sleep(5000 + Math.random() * 5000);
       }
 
-      await this.sendFollowup(lead, message);
+      const ok = await this.sendFollowup(lead, message);
+      if (!ok) {
+        // Envio falhou (WhatsApp/uazapi) — mesma lógica: não avança o passo,
+        // tenta de novo em breve.
+        await this.leadsRepo.update(lead.id, { nextNurtureAt: new Date(Date.now() + 5 * 60_000) });
+        this.logger.warn(`[CADENCE] Falha ao enviar toque ${stepIndex + 1} pra ${lead.phone} — tenta de novo em 5min`);
+        continue;
+      }
+
+      // Só agora, com a mensagem confirmadamente enviada, avança o passo e
+      // agenda o próximo toque.
+      const nextOffset = steps[stepIndex + 1];
+      const nextNurtureAt = nextOffset != null ? new Date(Date.now() + nextOffset * 60_000) : null;
+      await this.leadsRepo.update(lead.id, { nurtureStep: stepIndex + 1, nextNurtureAt });
+
       sent++;
       this.logger.log(`[CADENCE] Toque ${stepIndex + 1}/${steps.length} → ${lead.phone} (lead ${lead.id})`);
     }
@@ -846,6 +872,10 @@ ${tomBlock}`;
       // colada no system prompt lá no início — testado que, colada no início, o modelo
       // ignora e volta pro fluxo de qualificação padrão (instrução fica "afogada" pelo
       // prompt longo). Perto do ponto de geração, a instrução é seguida de verdade.
+      // Gemini gasta budget com "thinking" mesmo num texto curto — 150 tokens
+      // é pouco pra sobrar espaço depois disso (mesmo bug do sdr.service.ts).
+      const isGemini = /gemini/i.test(model);
+
       const response = await client.chat.completions.create({
         model,
         messages: [
@@ -855,6 +885,7 @@ ${tomBlock}`;
         ],
         temperature: 0.8,
         max_completion_tokens: 150,
+        ...(isGemini ? ({ reasoning_effort: 'none' } as any) : {}),
       });
 
       return response.choices[0].message.content?.trim() ?? '';
@@ -901,6 +932,8 @@ ${miolo}${this.antiRepeatBlock(history)}
 
 ${cadenceTomBlock(!!guide)}`;
 
+      const isGemini = /gemini/i.test(model);
+
       const response = await client.chat.completions.create({
         model,
         messages: [
@@ -910,6 +943,7 @@ ${cadenceTomBlock(!!guide)}`;
         ],
         temperature: 0.8,
         max_completion_tokens: 150,
+        ...(isGemini ? ({ reasoning_effort: 'none' } as any) : {}),
       });
 
       return response.choices[0].message.content?.trim() ?? '';
@@ -958,6 +992,8 @@ ${miolo}${this.antiRepeatBlock(history)}
 
 ${cadenceTomBlock(!!guide)}`;
 
+      const isGemini = /gemini/i.test(model);
+
       const response = await client.chat.completions.create({
         model,
         messages: [
@@ -967,6 +1003,7 @@ ${cadenceTomBlock(!!guide)}`;
         ],
         temperature: 0.8,
         max_completion_tokens: 150,
+        ...(isGemini ? ({ reasoning_effort: 'none' } as any) : {}),
       });
 
       return response.choices[0].message.content?.trim() ?? '';
@@ -976,10 +1013,11 @@ ${cadenceTomBlock(!!guide)}`;
     }
   }
 
-  private async sendFollowup(lead: Lead, text: string) {
+  /** Retorna true só quando o WhatsApp aceitou o envio — quem chama usa isso pra decidir se pode avançar estado (ex.: nurtureStep da cadência) sem perder o toque numa falha silenciosa. */
+  private async sendFollowup(lead: Lead, text: string): Promise<boolean> {
     if (!this.uazapiToken) {
       this.logger.warn(`[Followup] Token SDR não configurado — follow-up não enviado para ${lead.phone}`);
-      return;
+      return false;
     }
 
     try {
@@ -1006,8 +1044,10 @@ ${cadenceTomBlock(!!guide)}`;
       if (fresh) this.realtime.emitLeadUpdated(fresh);
 
       this.logger.log(`[Followup] Enviado para ${lead.phone}: "${text.slice(0, 60)}..."`);
+      return true;
     } catch (err: any) {
       this.logger.error(`[Followup] Erro ao enviar para ${lead.phone}: ${err.message}`);
+      return false;
     }
   }
 
