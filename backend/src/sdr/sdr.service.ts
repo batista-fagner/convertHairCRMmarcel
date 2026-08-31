@@ -94,6 +94,16 @@ export class SdrService {
         { role: 'user', content: incomingText },
       ];
 
+      // Gemini (endpoint OpenAI-compatible do Google) também consome tokens de
+      // "thinking" de dentro do mesmo budget de max_completion_tokens, igual ao
+      // gpt-5.4-mini — mas nesse SDR (JSON simples, sem raciocínio complexo) o
+      // thinking só rouba espaço da resposta e às vezes estoura o budget inteiro
+      // sem sobrar nada pro JSON (foi o que aconteceu com a Camila/850-517-6740
+      // às 15:29 de 31/08: "Resposta sem JSON válido" 2x seguidas). Desliga via
+      // reasoning_effort: "none", que o compat layer do Google mapeia pra
+      // thinking_budget: 0. Não afeta outros provedores (campo extra ignorado).
+      const isGemini = /gemini/i.test(model);
+
       const response = await client.chat.completions.create({
         model,
         messages,
@@ -105,6 +115,7 @@ export class SdrService {
         // devolvia um objeto vazio/truncado em vez de erro (ver validação abaixo).
         max_completion_tokens: 900,
         response_format: { type: 'json_object' },
+        ...(isGemini ? ({ reasoning_effort: 'none' } as any) : {}),
       });
 
       let raw = response.choices[0].message.content?.trim() ?? '';

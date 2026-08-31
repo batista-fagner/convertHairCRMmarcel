@@ -126,12 +126,18 @@ export class SettingsService {
       { role: 'user', content: message },
     ];
 
+    // Gemini via endpoint compat do Google gasta budget com "thinking" — desliga
+    // aqui também (mesmo motivo do sdr.service.ts), senão o simulador falha do
+    // mesmo jeito com "Resposta sem JSON válido" quando o modelo é Gemini.
+    const isGemini = /gemini/i.test(model);
+
     const response = await client.chat.completions.create({
       model,
       messages,
       temperature: 0.7,
       max_completion_tokens: 300,
       response_format: { type: 'json_object' },
+      ...(isGemini ? ({ reasoning_effort: 'none' } as any) : {}),
     });
 
     let raw = response.choices[0].message.content?.trim() ?? '';
