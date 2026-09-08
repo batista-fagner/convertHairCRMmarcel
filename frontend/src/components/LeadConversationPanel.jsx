@@ -136,8 +136,13 @@ export default function LeadConversationPanel({
   const blockedByTag = leadTags.some(t => aiDisabledTags.includes(t))
   const scheduleBlockedByTag = !blockedByTag && leadTags.some(t => noScheduleTags.includes(t))
 
+  // Lista pra escolher: só as tags já criadas em Configurações (pausar IA +
+  // bloquear agendamento) — o cliente escolhe da lista, não digita nada, então
+  // não tem como criar tag "errada"/sem efeito por engano.
+  const availableTags = Array.from(new Set([...aiDisabledTags, ...noScheduleTags])).filter(t => !leadTags.includes(t))
+
   const addTag = (value) => {
-    const clean = value.trim().toLowerCase()
+    const clean = (value || '').trim().toLowerCase()
     setTagDraft('')
     if (!clean || leadTags.includes(clean) || !onTagsChange) return
     onTagsChange(lead.id, [...leadTags, clean])
@@ -342,21 +347,31 @@ export default function LeadConversationPanel({
               </span>
             )
           })}
-          <div className="flex items-center gap-1">
-            <input
-              type="text"
-              value={tagDraft}
-              onChange={e => setTagDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(tagDraft) } }}
-              placeholder="Adicionar tag..."
-              className="text-[11px] border border-slate-200 rounded-full px-2 py-0.5 w-28 focus:outline-none focus:ring-1 focus:ring-violet-300"
-            />
-            {tagDraft.trim() && (
-              <button onClick={() => addTag(tagDraft)} className="p-0.5 text-violet-500 hover:text-violet-700">
-                <Plus className="w-3.5 h-3.5" />
+          {availableTags.length > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <select
+                value={tagDraft}
+                onChange={e => setTagDraft(e.target.value)}
+                className="text-[11px] border border-slate-200 rounded-full pl-2.5 pr-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white text-slate-600"
+              >
+                <option value="">Selecione uma tag...</option>
+                {availableTags.map(t => (
+                  <option key={t} value={t}>
+                    {t} {aiDisabledTags.includes(t) ? '(pausa IA)' : '(bloqueia agenda)'}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => addTag(tagDraft)}
+                disabled={!tagDraft}
+                className="flex items-center gap-1 text-[11px] font-medium text-white bg-violet-500 hover:bg-violet-600 disabled:bg-slate-200 disabled:cursor-not-allowed px-2.5 py-1 rounded-full transition"
+              >
+                <Plus className="w-3 h-3" /> Salvar
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <span className="text-[11px] text-slate-400">Nenhuma tag criada ainda — crie em Configurações.</span>
+          )}
         </div>
       )}
 
