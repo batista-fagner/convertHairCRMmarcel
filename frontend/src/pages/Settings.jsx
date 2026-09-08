@@ -2224,6 +2224,126 @@ function NotifyPhonesConfig() {
   )
 }
 
+// Tags que, quando marcadas num lead, pausam a IA automaticamente (ex.: "aluno"
+// — alguém que já é cliente e não deve entrar no fluxo de qualificação). O
+// operador cria a tag aqui (texto livre) e depois marca leads com ela no
+// Kanban/Inbox (editor de tags no painel de conversa).
+function AiDisabledTagsConfig() {
+  const [tags, setTags] = useState([])
+  const [allTags, setAllTags] = useState([])
+  const [draft, setDraft] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`${API}/settings/ai-disabled-tags`).then(r => r.json()),
+      fetch(`${API}/leads/tags/all`).then(r => r.json()).catch(() => []),
+    ])
+      .then(([disabled, existing]) => {
+        setTags(disabled.tags || [])
+        setAllTags(Array.isArray(existing) ? existing : [])
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  const persist = async (next) => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      const res = await fetch(`${API}/settings/ai-disabled-tags`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: next }),
+      })
+      const data = await res.json()
+      setTags(data.tags || [])
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addTag = (value) => {
+    const clean = value.trim().toLowerCase()
+    if (!clean || tags.includes(clean)) { setDraft(''); return }
+    setDraft('')
+    persist([...tags, clean])
+  }
+
+  const removeTag = (tag) => persist(tags.filter(t => t !== tag))
+
+  const suggestions = allTags.filter(t => !tags.includes(t) && (!draft || t.includes(draft.trim().toLowerCase())))
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Tag className="w-5 h-5 text-amber-500" />
+        <div>
+          <p className="font-semibold text-slate-800 text-sm">Tags que pausam a IA</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Crie uma tag (ex.: "aluno") e marque nos leads que a Sofia não deve abordar. Qualquer lead com uma dessas tags fica fora de resposta automática, abertura proativa e follow-up.
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-slate-400 text-sm py-2">
+          <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {tags.length === 0 && (
+              <span className="text-xs text-slate-400">Nenhuma tag configurada ainda.</span>
+            )}
+            {tags.map(tag => (
+              <span key={tag} className="flex items-center gap-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1 rounded-full">
+                {tag}
+                <button onClick={() => removeTag(tag)} disabled={saving} className="hover:text-red-500 transition">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+
+          <div className="relative">
+            <input
+              type="text"
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(draft) } }}
+              placeholder="Digite o nome da tag e pressione Enter (ex.: aluno)"
+              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            />
+            {draft.trim() && suggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                {suggestions.slice(0, 6).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => addTag(s)}
+                    className="w-full text-left text-sm px-3.5 py-2 hover:bg-amber-50 text-slate-600"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {saved && (
+            <span className="flex items-center gap-1.5 text-emerald-600 text-xs font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Salvo!
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const AVAILABILITY_WEEKDAYS_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const AVAILABILITY_MONTHS = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -2513,6 +2633,8 @@ export default function Settings() {
       <IgCatchallEditor />
 
       <NotifyPhonesConfig />
+
+      <AiDisabledTagsConfig />
 
       <AvailabilityCalendar />
 

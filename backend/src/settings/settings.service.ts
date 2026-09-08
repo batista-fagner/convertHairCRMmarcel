@@ -16,6 +16,12 @@ import {
 import { AvailabilityService } from '../availability/availability.service';
 import { encryptSecret, decryptSecret, maskSecretPreview } from '../common/crypto.util';
 
+// Tags que, quando presentes num lead, pausam a IA (ex.: "aluno" — alguém que
+// já é cliente/aluno e não deve ser abordado pelo fluxo de qualificação).
+// Configurável em Settings → Tags. Guardado como JSON array em `settings`.
+export const AI_DISABLED_TAGS_KEY = 'sdr_ai_disabled_tags';
+const MAX_DISABLED_TAGS = 30;
+
 @Injectable()
 export class SettingsService {
   private readonly forceCodePrompt: boolean;
@@ -82,6 +88,31 @@ export class SettingsService {
       apiKeySet: !!encKey,
       apiKeyPreview: encKey ? maskSecretPreview(decryptSecret(encKey)) : '',
     };
+  }
+
+  /**
+   * Tags configuradas pra pausar a IA automaticamente (ver AI_DISABLED_TAGS_KEY).
+   * Checada em sdr.controller.ts (resposta a mensagem recebida + abertura
+   * proativa) e sdr-followup.service.ts (cadência/follow-up) — qualquer lead
+   * com uma dessas tags fica fora de todo envio automático.
+   */
+  async getAiDisabledTags(): Promise<string[]> {
+    const raw = await this.get(AI_DISABLED_TAGS_KEY);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((t) => typeof t === 'string' && t.trim()) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async setAiDisabledTags(tags: string[]): Promise<string[]> {
+    const clean = Array.from(
+      new Set((Array.isArray(tags) ? tags : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
+    ).slice(0, MAX_DISABLED_TAGS);
+    await this.set(AI_DISABLED_TAGS_KEY, JSON.stringify(clean));
+    return clean;
   }
 
   async setAiProviderConfig(body: { apiKey?: string; baseUrl?: string; model?: string; clearApiKey?: boolean }) {

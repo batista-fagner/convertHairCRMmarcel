@@ -278,7 +278,7 @@ function Column({ column, leads, onOpen, onEdit, onDelete }) {
   )
 }
 
-function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes }) {
+function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes, onTagsChange }) {
   if (!lead) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -292,6 +292,7 @@ function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes
           onTogglePause={onTogglePause}
           onAssign={onAssign}
           onSaveNotes={onSaveNotes}
+          onTagsChange={onTagsChange}
         />
       </div>
     </div>
@@ -619,6 +620,23 @@ export default function KanbanLeads() {
     }
   }, [updateLeadInPlace])
 
+  const saveTags = useCallback(async (leadId, tags) => {
+    updateLeadInPlace({ id: leadId, tags })
+    setSelected(prev => prev?.id === leadId ? { ...prev, tags } : prev)
+    try {
+      const res = await fetch(`${API}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags }),
+      })
+      const fresh = await res.json()
+      updateLeadInPlace(fresh)
+      setSelected(prev => prev?.id === leadId ? { ...prev, tags: fresh.tags } : prev)
+    } catch (e) {
+      console.error('Erro ao salvar tags', e)
+    }
+  }, [updateLeadInPlace])
+
   const createLead = useCallback((lead) => {
     placeLead(lead)
   }, [placeLead])
@@ -821,7 +839,7 @@ export default function KanbanLeads() {
         </DndContext>
       )}
 
-      <ConversationModal key={selected?.id} lead={selected} onClose={() => setSelected(null)} onTogglePause={togglePause} onAssign={assignVendedor} onSaveNotes={saveNotes} />
+      <ConversationModal key={selected?.id} lead={selected} onClose={() => setSelected(null)} onTogglePause={togglePause} onAssign={assignVendedor} onSaveNotes={saveNotes} onTagsChange={saveTags} />
       <EditNameModal key={editing?.id} lead={editing} onClose={() => setEditing(null)} onSave={saveName} />
       <ConfirmDeleteModal lead={deleting} onClose={() => setDeleting(null)} onConfirm={deleteLead} />
       <CreateLeadModal open={creating} onClose={() => setCreating(false)} onCreate={createLead} />

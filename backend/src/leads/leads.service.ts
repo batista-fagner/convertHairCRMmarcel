@@ -38,7 +38,7 @@ export class LeadsService {
    * abertura proativa (ver checkNeverStartedLeads em sdr.controller.ts).
    * ai_paused=false exclui quem foi pausado manualmente (ex.: lead de teste).
    */
-  async findNeverStartedOlderThan(cutoff: Date, createdAfter?: Date, maxOpeningAttempts?: number): Promise<Lead[]> {
+  async findNeverStartedOlderThan(cutoff: Date, createdAfter?: Date, maxOpeningAttempts?: number, excludeTags?: string[]): Promise<Lead[]> {
     const query = this.leadsRepo
       .createQueryBuilder('lead')
       .where('lead.agent_mode = :mode', { mode: 'sdr' })
@@ -52,7 +52,20 @@ export class LeadsService {
       .andWhere('lead.imported_at IS NULL');
     if (createdAfter) query.andWhere('lead.created_at >= :createdAfter', { createdAfter });
     if (maxOpeningAttempts != null) query.andWhere('lead.opening_attempts < :maxOpeningAttempts', { maxOpeningAttempts });
+    // Tags que pausam a IA (Settings → Tags) — lead com qualquer uma delas não
+    // recebe abertura proativa (ver AI_DISABLED_TAGS_KEY em settings.service.ts).
+    if (excludeTags?.length) query.andWhere('NOT (lead.tags ?| :excludeTags::text[])', { excludeTags });
     return query.getMany();
+  }
+
+  /** Tags distintas já usadas em algum lead (pra autocomplete no editor de tags). */
+  async getAllTags(): Promise<string[]> {
+    const rows = await this.leadsRepo
+      .createQueryBuilder('lead')
+      .select('DISTINCT jsonb_array_elements_text(lead.tags)', 'tag')
+      .where('lead.tags IS NOT NULL')
+      .getRawMany<{ tag: string }>();
+    return rows.map((r) => r.tag).filter(Boolean).sort();
   }
 
   async findAll(opts?: { campaignId?: string; page?: number; limit?: number; source?: 'all' | 'ig_dm' | 'paid' | 'imported'; search?: string }): Promise<{ data: Lead[]; total: number; page: number; totalPages: number }> {

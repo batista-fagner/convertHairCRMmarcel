@@ -185,14 +185,27 @@ export class LeadsController {
   }
 
   @Patch(':id')
-  async edit(@Param('id') id: string, @Body() body: { name?: string; assignedTo?: string | null; notes?: string | null }) {
-    const data: { name?: string; assignedTo?: string | null; notes?: string | null } = {};
+  async edit(@Param('id') id: string, @Body() body: { name?: string; assignedTo?: string | null; notes?: string | null; tags?: string[] }) {
+    const data: { name?: string; assignedTo?: string | null; notes?: string | null; tags?: string[] } = {};
     if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim();
     if ('assignedTo' in body) data.assignedTo = body.assignedTo?.trim() || null;
     if ('notes' in body) data.notes = body.notes ?? null;
+    if ('tags' in body) {
+      data.tags = Array.from(
+        new Set((Array.isArray(body.tags) ? body.tags : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
+      ).slice(0, 20);
+    }
     const lead = await this.leadsService.update(id, data);
     this.realtime.emitLeadUpdated(lead);
     return lead;
+  }
+
+  // Tags distintas já usadas em algum lead — alimenta o autocomplete do editor
+  // de tags (Kanban/Inbox) e da tela de Configurações (regra "IA não conversa
+  // com quem tem essa tag").
+  @Get('tags/all')
+  async allTags() {
+    return this.leadsService.getAllTags();
   }
 
   @Get(':id')

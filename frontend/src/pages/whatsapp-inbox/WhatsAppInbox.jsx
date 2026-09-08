@@ -166,6 +166,21 @@ export default function WhatsAppInbox() {
     }
   }, [updateSelectedAndList])
 
+  const saveTags = useCallback(async (leadId, tags) => {
+    updateSelectedAndList({ id: leadId, tags })
+    try {
+      const res = await fetch(`${API}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags }),
+      })
+      const fresh = await res.json()
+      updateSelectedAndList(fresh)
+    } catch (e) {
+      console.error('Erro ao salvar tags', e)
+    }
+  }, [updateSelectedAndList])
+
   return (
     <div className="h-[calc(100vh-64px)] flex bg-white">
       <LeadConversationList
@@ -190,6 +205,7 @@ export default function WhatsAppInbox() {
             onTogglePause={togglePause}
             onAssign={assignVendedor}
             onSaveNotes={saveNotes}
+            onTagsChange={saveTags}
             showCloseButton={false}
           />
         ) : (

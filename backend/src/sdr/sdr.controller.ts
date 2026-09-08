@@ -142,10 +142,12 @@ export class SdrController {
     this.checkingNeverStarted = true;
     try {
       const cutoff = new Date(Date.now() - SdrController.NEVER_STARTED_WAIT_MINUTES * 60 * 1000);
+      const disabledTags = await this.settings.getAiDisabledTags();
       const leads = await this.leadsService.findNeverStartedOlderThan(
         cutoff,
         SdrController.NEVER_STARTED_FEATURE_LAUNCH_AT,
         SdrController.NEVER_STARTED_MAX_ATTEMPTS,
+        disabledTags,
       );
       let sent = 0;
       for (const lead of leads) {
@@ -545,6 +547,19 @@ export class SdrController {
       lead = await this.leadsService.update(lead.id, { aiContext: ctx, waLastMessageAt: new Date() });
       this.realtime.emitLeadUpdated(lead);
       this.logger.log(`[SDR] Lead ${phone} com IA pausada — mensagem registrada, sem resposta`);
+      return;
+    }
+
+    // Regra de tag (Settings → Tags, ex.: "aluno"): lead marcado com uma tag
+    // configurada pra pausar a IA não recebe resposta automática, mesmo com
+    // ai_paused=false — mesmo tratamento do bloco acima (registra e sai).
+    const disabledTags = await this.settings.getAiDisabledTags();
+    const leadTags = Array.isArray(lead.tags) ? lead.tags : [];
+    if (disabledTags.length && leadTags.some((t) => disabledTags.includes(t))) {
+      const ctx = [...(Array.isArray(lead.aiContext) ? lead.aiContext : []), { role: 'user', content: text, timestamp: new Date().toISOString() }];
+      lead = await this.leadsService.update(lead.id, { aiContext: ctx, waLastMessageAt: new Date() });
+      this.realtime.emitLeadUpdated(lead);
+      this.logger.log(`[SDR] Lead ${phone} com tag que pausa a IA (${leadTags.join(', ')}) — mensagem registrada, sem resposta`);
       return;
     }
 

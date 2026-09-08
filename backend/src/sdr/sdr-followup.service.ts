@@ -244,13 +244,15 @@ export class SdrFollowupService {
     // ainda — isso é feito por lead abaixo. O escopo real por raia é aplicado depois,
     // no matchRule() — só quem casa com uma regra ativa (raia+campanha+criativo) sai
     // daqui com mensagem de fato.
-    const candidates = await this.leadsRepo
+    const disabledTags = await this.settings.getAiDisabledTags();
+    const candidatesQuery = this.leadsRepo
       .createQueryBuilder('lead')
       .where('lead.agent_mode = :mode', { mode: 'sdr' })
       .andWhere('lead.ai_paused = false')
       .andWhere('lead.wa_last_message_at IS NOT NULL')
-      .andWhere('lead.followup_sent_at IS NULL')
-      .getMany();
+      .andWhere('lead.followup_sent_at IS NULL');
+    if (disabledTags.length) candidatesQuery.andWhere('NOT (lead.tags ?| :disabledTags::text[])', { disabledTags });
+    const candidates = await candidatesQuery.getMany();
 
     const videoLimit = await this.getVideoLimit();
 
@@ -560,14 +562,16 @@ export class SdrFollowupService {
     if (!this.isWithinCadenceWindow(cadence)) return;
     const steps = cadence.steps;
 
-    const dueLeads = await this.leadsRepo
+    const disabledTags = await this.settings.getAiDisabledTags();
+    const dueLeadsQuery = this.leadsRepo
       .createQueryBuilder('lead')
       .where('lead.agent_mode = :mode', { mode: 'sdr' })
       .andWhere('lead.ai_paused = false')
       .andWhere('lead.nurture_paused = false')
       .andWhere('lead.next_nurture_at IS NOT NULL')
-      .andWhere('lead.next_nurture_at <= :now', { now: new Date() })
-      .getMany();
+      .andWhere('lead.next_nurture_at <= :now', { now: new Date() });
+    if (disabledTags.length) dueLeadsQuery.andWhere('NOT (lead.tags ?| :disabledTags::text[])', { disabledTags });
+    const dueLeads = await dueLeadsQuery.getMany();
 
     let sent = 0;
     for (const lead of dueLeads) {

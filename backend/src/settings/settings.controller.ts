@@ -74,6 +74,19 @@ export class SettingsController {
     return { phone1: phones[0] ?? '', phone2: phones[1] ?? '' };
   }
 
+  // Tags que pausam a IA automaticamente (ex.: "aluno") — o operador cria a
+  // tag livremente aqui e depois marca leads com ela no Kanban/Inbox.
+  @Get('ai-disabled-tags')
+  async getAiDisabledTags() {
+    return { tags: await this.settingsService.getAiDisabledTags() };
+  }
+
+  @Put('ai-disabled-tags')
+  async setAiDisabledTags(@Body() body: { tags: string[] }) {
+    const tags = await this.settingsService.setAiDisabledTags(body.tags ?? []);
+    return { tags };
+  }
+
   // Guarda as credenciais do Meta Ads API no banco (chave-valor), pra não
   // depender de variável de ambiente no Railway. Token nunca volta inteiro
   // pro frontend — só um indicador de "configurado" pra não vazar segredo.
