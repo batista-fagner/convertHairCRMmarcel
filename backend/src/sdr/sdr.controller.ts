@@ -575,9 +575,21 @@ export class SdrController {
 
     await this.sendTyping(phone, 2000);
 
+    // Tag de "bloquear agendamento" (Settings → Tags): a IA continua
+    // conversando normal, só não recebe a tabela de horários reais — reaproveita
+    // o mesmo comportamento de "agenda cheia" (ver handoff mais abaixo, que já
+    // faz handoff sem agendar quando availability.hasSlots é false).
+    const noScheduleTags = await this.settings.getNoScheduleTags();
+    const scheduleBlocked = noScheduleTags.length > 0 && leadTags.some((t) => noScheduleTags.includes(t));
+
     // Tabela de horários livres do Marcel, recalculada a cada mensagem — a Clara
     // só pode oferecer/confirmar horários que estão literalmente aqui.
-    const availability = await this.availabilityService.buildAvailabilityBlock();
+    const availability = scheduleBlocked
+      ? {
+          text: 'Agenda indisponível para oferecer a esse contato agora. NÃO ofereça nem confirme nenhum horário. Se ela perguntar sobre agendar, diga que o time vai entrar em contato para alinhar os próximos passos.',
+          hasSlots: false,
+        }
+      : await this.availabilityService.buildAvailabilityBlock();
 
     // Processa com IA (1 retry se falhar)
     let ai = await this.sdrService.processMessage(lead, text, availability.text);
@@ -624,7 +636,7 @@ export class SdrController {
     // a mensagem real enviada, não a que a IA assumiu que ia mandar.
     let bookedNow = false;
     let bookedAtDateTime: Date | null = null;
-    if (readyForHandoff && !alreadyHandedOff && ai.action === 'schedule' && ai.appointmentDateTime) {
+    if (readyForHandoff && !alreadyHandedOff && !scheduleBlocked && ai.action === 'schedule' && ai.appointmentDateTime) {
       const parsedDateTime = this.availabilityService.parseNyNaiveDateTime(ai.appointmentDateTime);
       if (parsedDateTime && (await this.availabilityService.isSlotAvailable(parsedDateTime))) {
         try {

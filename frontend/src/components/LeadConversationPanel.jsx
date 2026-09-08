@@ -72,16 +72,22 @@ export default function LeadConversationPanel({
   const [sendError, setSendError] = useState('')
   const [tagDraft, setTagDraft] = useState('')
   const [aiDisabledTags, setAiDisabledTags] = useState([])
+  const [noScheduleTags, setNoScheduleTags] = useState([])
   const chatBottomRef = useRef(null)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
 
   // Carregado 1x (não muda por lead) — só pra sinalizar visualmente quando uma
-  // tag do próprio lead é uma das que pausam a IA (Configurações → Tags).
+  // tag do próprio lead é uma das configuradas em Configurações → Tags
+  // (pausar IA / bloquear agendamento).
   useEffect(() => {
     fetch(`${API}/settings/ai-disabled-tags`)
       .then(r => r.json())
       .then(d => setAiDisabledTags(d.tags || []))
+      .catch(() => {})
+    fetch(`${API}/settings/no-schedule-tags`)
+      .then(r => r.json())
+      .then(d => setNoScheduleTags(d.tags || []))
       .catch(() => {})
   }, [])
 
@@ -128,6 +134,7 @@ export default function LeadConversationPanel({
 
   const leadTags = Array.isArray(lead.tags) ? lead.tags : []
   const blockedByTag = leadTags.some(t => aiDisabledTags.includes(t))
+  const scheduleBlockedByTag = !blockedByTag && leadTags.some(t => noScheduleTags.includes(t))
 
   const addTag = (value) => {
     const clean = value.trim().toLowerCase()
@@ -257,6 +264,10 @@ export default function LeadConversationPanel({
             <span className="flex items-center gap-1.5 text-amber-600 font-medium" title="Uma tag deste lead está configurada em Configurações → Tags pra pausar a IA">
               <PauseCircle className="w-4 h-4" /> IA pausada por tag
             </span>
+          ) : scheduleBlockedByTag ? (
+            <span className="flex items-center gap-1.5 text-sky-600 font-medium" title="Uma tag deste lead está configurada em Configurações → Tags pra bloquear agendamento">
+              <Bot className="w-4 h-4" /> IA respondendo — agendamento bloqueado por tag
+            </span>
           ) : (
             <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
               <Bot className="w-4 h-4" /> IA respondendo automaticamente
@@ -305,13 +316,24 @@ export default function LeadConversationPanel({
           <Tag className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           {leadTags.map(tag => {
             const isBlocking = aiDisabledTags.includes(tag)
+            const blocksSchedule = !isBlocking && noScheduleTags.includes(tag)
             return (
               <span
                 key={tag}
                 className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                  isBlocking ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-slate-100 text-slate-600'
+                  isBlocking
+                    ? 'bg-amber-50 border border-amber-200 text-amber-700'
+                    : blocksSchedule
+                    ? 'bg-sky-50 border border-sky-200 text-sky-700'
+                    : 'bg-slate-100 text-slate-600'
                 }`}
-                title={isBlocking ? 'Tag configurada em Configurações pra pausar a IA' : undefined}
+                title={
+                  isBlocking
+                    ? 'Tag configurada em Configurações pra pausar a IA'
+                    : blocksSchedule
+                    ? 'Tag configurada em Configurações pra bloquear agendamento'
+                    : undefined
+                }
               >
                 {tag}
                 <button onClick={() => removeTag(tag)} className="hover:text-red-500 transition">

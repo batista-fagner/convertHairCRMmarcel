@@ -22,6 +22,13 @@ import { encryptSecret, decryptSecret, maskSecretPreview } from '../common/crypt
 export const AI_DISABLED_TAGS_KEY = 'sdr_ai_disabled_tags';
 const MAX_DISABLED_TAGS = 30;
 
+// Tags que, quando presentes num lead, mantêm a IA conversando normalmente
+// mas bloqueiam o agendamento (a IA nunca oferece/confirma horário — se o
+// lead pedir, ela avisa que o time vai entrar em contato). Configurável em
+// Settings → Tags, mesma mecânica de AI_DISABLED_TAGS_KEY, lista independente.
+export const NO_SCHEDULE_TAGS_KEY = 'sdr_no_schedule_tags';
+const MAX_NO_SCHEDULE_TAGS = 30;
+
 @Injectable()
 export class SettingsService {
   private readonly forceCodePrompt: boolean;
@@ -112,6 +119,31 @@ export class SettingsService {
       new Set((Array.isArray(tags) ? tags : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
     ).slice(0, MAX_DISABLED_TAGS);
     await this.set(AI_DISABLED_TAGS_KEY, JSON.stringify(clean));
+    return clean;
+  }
+
+  /**
+   * Tags configuradas pra bloquear agendamento (ver NO_SCHEDULE_TAGS_KEY) — a
+   * IA continua respondendo o lead normalmente, só não cria compromisso na
+   * agenda. Checada em sdr.controller.ts (processMessage), que troca a tabela
+   * de horários passada pro prompt por uma mensagem de "sem vaga" pra esse lead.
+   */
+  async getNoScheduleTags(): Promise<string[]> {
+    const raw = await this.get(NO_SCHEDULE_TAGS_KEY);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((t) => typeof t === 'string' && t.trim()) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async setNoScheduleTags(tags: string[]): Promise<string[]> {
+    const clean = Array.from(
+      new Set((Array.isArray(tags) ? tags : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
+    ).slice(0, MAX_NO_SCHEDULE_TAGS);
+    await this.set(NO_SCHEDULE_TAGS_KEY, JSON.stringify(clean));
     return clean;
   }
 

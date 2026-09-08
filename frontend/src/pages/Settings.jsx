@@ -2224,11 +2224,17 @@ function NotifyPhonesConfig() {
   )
 }
 
-// Tags que, quando marcadas num lead, pausam a IA automaticamente (ex.: "aluno"
-// — alguém que já é cliente e não deve entrar no fluxo de qualificação). O
-// operador cria a tag aqui (texto livre) e depois marca leads com ela no
-// Kanban/Inbox (editor de tags no painel de conversa).
-function AiDisabledTagsConfig() {
+// Editor genérico de lista de tags de regra (pausar IA / bloquear agendamento
+// etc.) — cada instância aponta pro próprio endpoint em Configurações e usa
+// uma cor própria pra não confundir uma lista com a outra. O operador cria a
+// tag aqui (texto livre) e depois marca leads com ela no Kanban/Inbox.
+const TAG_RULE_COLORS = {
+  amber: { icon: 'text-amber-500', chip: 'bg-amber-50 border border-amber-200 text-amber-700', ring: 'focus:ring-amber-300', hover: 'hover:bg-amber-50' },
+  sky: { icon: 'text-sky-500', chip: 'bg-sky-50 border border-sky-200 text-sky-700', ring: 'focus:ring-sky-300', hover: 'hover:bg-sky-50' },
+}
+
+function TagRuleConfig({ endpoint, title, description, placeholder, color = 'amber' }) {
+  const c = TAG_RULE_COLORS[color]
   const [tags, setTags] = useState([])
   const [allTags, setAllTags] = useState([])
   const [draft, setDraft] = useState('')
@@ -2238,21 +2244,21 @@ function AiDisabledTagsConfig() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/settings/ai-disabled-tags`).then(r => r.json()),
+      fetch(`${API}/settings/${endpoint}`).then(r => r.json()),
       fetch(`${API}/leads/tags/all`).then(r => r.json()).catch(() => []),
     ])
-      .then(([disabled, existing]) => {
-        setTags(disabled.tags || [])
+      .then(([configured, existing]) => {
+        setTags(configured.tags || [])
         setAllTags(Array.isArray(existing) ? existing : [])
       })
       .finally(() => setLoading(false))
-  }, [])
+  }, [endpoint])
 
   const persist = async (next) => {
     setSaving(true)
     setSaved(false)
     try {
-      const res = await fetch(`${API}/settings/ai-disabled-tags`, {
+      const res = await fetch(`${API}/settings/${endpoint}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tags: next }),
@@ -2280,12 +2286,10 @@ function AiDisabledTagsConfig() {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
       <div className="flex items-center gap-2 mb-4">
-        <Tag className="w-5 h-5 text-amber-500" />
+        <Tag className={`w-5 h-5 ${c.icon}`} />
         <div>
-          <p className="font-semibold text-slate-800 text-sm">Tags que pausam a IA</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Crie uma tag (ex.: "aluno") e marque nos leads que a Sofia não deve abordar. Qualquer lead com uma dessas tags fica fora de resposta automática, abertura proativa e follow-up.
-          </p>
+          <p className="font-semibold text-slate-800 text-sm">{title}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{description}</p>
         </div>
       </div>
 
@@ -2300,7 +2304,7 @@ function AiDisabledTagsConfig() {
               <span className="text-xs text-slate-400">Nenhuma tag configurada ainda.</span>
             )}
             {tags.map(tag => (
-              <span key={tag} className="flex items-center gap-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-700 px-2.5 py-1 rounded-full">
+              <span key={tag} className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${c.chip}`}>
                 {tag}
                 <button onClick={() => removeTag(tag)} disabled={saving} className="hover:text-red-500 transition">
                   <X className="w-3 h-3" />
@@ -2315,8 +2319,8 @@ function AiDisabledTagsConfig() {
               value={draft}
               onChange={e => setDraft(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(draft) } }}
-              placeholder="Digite o nome da tag e pressione Enter (ex.: aluno)"
-              className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-300"
+              placeholder={placeholder}
+              className={`w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 ${c.ring}`}
             />
             {draft.trim() && suggestions.length > 0 && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
@@ -2324,7 +2328,7 @@ function AiDisabledTagsConfig() {
                   <button
                     key={s}
                     onClick={() => addTag(s)}
-                    className="w-full text-left text-sm px-3.5 py-2 hover:bg-amber-50 text-slate-600"
+                    className={`w-full text-left text-sm px-3.5 py-2 text-slate-600 ${c.hover}`}
                   >
                     {s}
                   </button>
@@ -2341,6 +2345,30 @@ function AiDisabledTagsConfig() {
         </div>
       )}
     </div>
+  )
+}
+
+function AiDisabledTagsConfig() {
+  return (
+    <TagRuleConfig
+      endpoint="ai-disabled-tags"
+      title="Tags que pausam a IA"
+      description='Crie uma tag (ex.: "aluno") e marque nos leads que a Sofia não deve abordar. Qualquer lead com uma dessas tags fica fora de resposta automática, abertura proativa e follow-up.'
+      placeholder='Digite o nome da tag e pressione Enter (ex.: aluno)'
+      color="amber"
+    />
+  )
+}
+
+function NoScheduleTagsConfig() {
+  return (
+    <TagRuleConfig
+      endpoint="no-schedule-tags"
+      title="Tags que bloqueiam agendamento"
+      description='Crie uma tag (ex.: "sem-agenda") pra leads que a IA pode continuar conversando, mas nunca deve agendar horário. Se o lead pedir pra marcar, ela avisa que o time entra em contato.'
+      placeholder='Digite o nome da tag e pressione Enter (ex.: sem-agenda)'
+      color="sky"
+    />
   )
 }
 
@@ -2635,6 +2663,8 @@ export default function Settings() {
       <NotifyPhonesConfig />
 
       <AiDisabledTagsConfig />
+
+      <NoScheduleTagsConfig />
 
       <AvailabilityCalendar />
 

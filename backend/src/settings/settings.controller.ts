@@ -87,6 +87,19 @@ export class SettingsController {
     return { tags };
   }
 
+  // Tags que só bloqueiam agendamento — a IA continua conversando com o lead,
+  // não cria compromisso na agenda pra ele.
+  @Get('no-schedule-tags')
+  async getNoScheduleTags() {
+    return { tags: await this.settingsService.getNoScheduleTags() };
+  }
+
+  @Put('no-schedule-tags')
+  async setNoScheduleTags(@Body() body: { tags: string[] }) {
+    const tags = await this.settingsService.setNoScheduleTags(body.tags ?? []);
+    return { tags };
+  }
+
   // Guarda as credenciais do Meta Ads API no banco (chave-valor), pra não
   // depender de variável de ambiente no Railway. Token nunca volta inteiro
   // pro frontend — só um indicador de "configurado" pra não vazar segredo.
