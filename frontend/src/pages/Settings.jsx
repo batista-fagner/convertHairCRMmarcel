@@ -2313,28 +2313,37 @@ function TagRuleConfig({ endpoint, title, description, placeholder, color = 'amb
             ))}
           </div>
 
-          <div className="relative">
-            <input
-              type="text"
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(draft) } }}
-              placeholder={placeholder}
-              className={`w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 ${c.ring}`}
-            />
-            {draft.trim() && suggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
-                {suggestions.slice(0, 6).map(s => (
-                  <button
-                    key={s}
-                    onClick={() => addTag(s)}
-                    className={`w-full text-left text-sm px-3.5 py-2 text-slate-600 ${c.hover}`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className="flex items-start gap-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(draft) } }}
+                placeholder={placeholder}
+                className={`w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 ${c.ring}`}
+              />
+              {draft.trim() && suggestions.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                  {suggestions.slice(0, 6).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => addTag(s)}
+                      className={`w-full text-left text-sm px-3.5 py-2 text-slate-600 ${c.hover}`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => addTag(draft)}
+              disabled={!draft.trim() || saving}
+              className="flex items-center gap-1.5 text-sm font-medium text-white bg-violet-500 hover:bg-violet-600 disabled:bg-slate-200 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl transition shrink-0"
+            >
+              <Save className="w-4 h-4" /> Salvar
+            </button>
           </div>
 
           {saved && (
