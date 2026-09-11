@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { io } from 'socket.io-client'
 import {
   Users, MessageCircle, Copy, CheckCircle2, Megaphone, X, Loader2,
   ExternalLink, Clock, MoreVertical, Send, Pencil, ChevronDown,
@@ -7,6 +8,7 @@ import {
 } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+const SOCKET_URL = API.replace(/\/api\/?$/, '') || 'http://localhost:3002'
 
 const STATUS_CONFIG = {
   novo:       { label: 'Novo',       className: 'bg-slate-100 text-slate-600',   header: 'bg-slate-400/20 text-slate-200' },
@@ -208,23 +210,23 @@ export default function Leads() {
     fetchLeads(1)
   }, [source, search])
 
-  // Enquanto o drawer de conversa está aberto, atualiza as mensagens do lead a cada 4s
+  // Mensagens novas chegam por socket (mesmo padrão do Kanban e do Inbox), não
+  // por polling: antes isto era um GET /leads/:id a cada 4s que trazia a thread
+  // inteira (aiContext) a cada ciclo enquanto a conversa estivesse aberta.
+  // O backend emite em todos os caminhos que mudam a conversa — resposta da IA,
+  // msg manual do operador, follow-up, IA pausada, lead encerrado — e `handoff`
+  // vem num evento próprio, por isso os dois listeners.
   useEffect(() => {
-    if (!chatOpen || !selectedLead || selectedLead.id === 'demo-lead-1') return
-    const id = selectedLead.id
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`${API}/leads/${id}`)
-        if (!res.ok) return
-        const fresh = await res.json()
-        setSelectedLead(prev => (prev && prev.id === fresh.id ? fresh : prev))
-        setLeads(prev => prev.map(l => (l.id === fresh.id ? fresh : l)))
-      } catch {
-        // silencioso — tenta de novo no próximo ciclo
-      }
-    }, 4000)
-    return () => clearInterval(interval)
-  }, [chatOpen, selectedLead?.id])
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] })
+    const applyUpdate = (fresh) => {
+      if (!fresh?.id) return
+      setSelectedLead(prev => (prev && prev.id === fresh.id ? fresh : prev))
+      setLeads(prev => prev.map(l => (l.id === fresh.id ? fresh : l)))
+    }
+    socket.on('lead:updated', applyUpdate)
+    socket.on('lead:handoff', applyUpdate)
+    return () => socket.disconnect()
+  }, [])
 
   const loadMore = () => {
     const next = page + 1
