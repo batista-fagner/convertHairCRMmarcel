@@ -195,6 +195,14 @@ export class LeadsService {
     return new Map(leads.map(l => [l.phone, l.name]));
   }
 
+  /**
+   * Antes isto trazia a tabela `leads` inteira (find sem select nem limite)
+   * só pra contar em memória e devolver 5 "recentes" — com aiContext (jsonb
+   * do histórico completo de conversa) embutido em cada linha por não ter
+   * select:false na entity. Polled a cada 60s por toda tela do CRM (Layout),
+   * então era o maior consumidor de egress do Supabase. Agora usa apenas
+   * agregações SQL (COUNT/GROUP BY) e um select explícito e leve pra "recent".
+   */
   async getStats(): Promise<{
     total: number;
     totalMql: number;
@@ -203,20 +211,46 @@ export class LeadsService {
     conversionRate: number;
     recent: Lead[];
   }> {
-    const all = await this.leadsRepo.find({ order: { createdAt: 'DESC' } });
-    const total = all.length;
-    const totalMql = all.filter(l => l.isMql).length;
+    const [total, totalMql, statusRows, waStageRows, recent] = await Promise.all([
+      this.leadsRepo.count(),
+      this.leadsRepo.count({ where: { isMql: true } }),
+      this.leadsRepo
+        .createQueryBuilder('lead')
+        .select('lead.status', 'status')
+        .addSelect('COUNT(*)', 'count')
+        .groupBy('lead.status')
+        .getRawMany<{ status: string; count: string }>(),
+      this.leadsRepo
+        .createQueryBuilder('lead')
+        .select('lead.wa_stage', 'waStage')
+        .addSelect('COUNT(*)', 'count')
+        .where('lead.wa_stage IS NOT NULL')
+        .groupBy('lead.wa_stage')
+        .getRawMany<{ waStage: string; count: string }>(),
+      this.leadsRepo
+        .createQueryBuilder('lead')
+        .select([
+          'lead.id',
+          'lead.name',
+          'lead.isMql',
+          'lead.utmMedium',
+          'lead.utmSource',
+          'lead.classification',
+          'lead.createdAt',
+        ])
+        .orderBy('lead.created_at', 'DESC')
+        .take(5)
+        .getMany(),
+    ]);
 
     const byStatus: Record<string, number> = {};
+    for (const row of statusRows) byStatus[row.status] = Number(row.count);
+
     const byWaStage: Record<string, number> = {};
-    for (const lead of all) {
-      byStatus[lead.status] = (byStatus[lead.status] || 0) + 1;
-      if (lead.waStage) byWaStage[lead.waStage] = (byWaStage[lead.waStage] || 0) + 1;
-    }
+    for (const row of waStageRows) byWaStage[row.waStage] = Number(row.count);
 
     const convertido = byStatus['convertido'] || 0;
     const conversionRate = total > 0 ? Math.round((convertido / total) * 1000) / 10 : 0;
-    const recent = all.slice(0, 5);
 
     return { total, totalMql, byStatus, byWaStage, conversionRate, recent };
   }
