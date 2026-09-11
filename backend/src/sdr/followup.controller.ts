@@ -9,6 +9,8 @@ import {
 import type { CadenceConfig } from './sdr-followup.service';
 import { FollowupVideoService } from './followup-video.service';
 import type { UploadedVideoFile } from './followup-video.service';
+import { FollowupAudioService } from './followup-audio.service';
+import type { UploadedAudioFile } from './followup-audio.service';
 import { SettingsService } from '../settings/settings.service';
 import { FollowupRule } from '../common/entities/followup-rule.entity';
 import { Lead } from '../common/entities/lead.entity';
@@ -18,6 +20,7 @@ export class FollowupController {
   constructor(
     private readonly followupService: SdrFollowupService,
     private readonly videoService: FollowupVideoService,
+    private readonly audioService: FollowupAudioService,
     private readonly settings: SettingsService,
     @InjectRepository(FollowupRule) private readonly rulesRepo: Repository<FollowupRule>,
     @InjectRepository(Lead) private readonly leadsRepo: Repository<Lead>,
@@ -60,9 +63,11 @@ export class FollowupController {
   @Post('rules')
   async createRule(@Body() body: Partial<FollowupRule>) {
     if (!body?.name?.trim()) throw new BadRequestException('Nome da regra é obrigatório');
+    if (body.audioId && body.videoId) throw new BadRequestException('Escolha áudio OU vídeo, não os dois');
     const hasVideo = Boolean(body.videoId);
-    // Regra com vídeo manda só o vídeo — modo/texto ficam irrelevantes.
-    if (!hasVideo && body.mode === 'manual' && !body.text?.trim()) {
+    const hasAudio = Boolean(body.audioId);
+    // Regra com vídeo/áudio manda só a mídia — modo/texto (do texto puro) ficam irrelevantes.
+    if (!hasVideo && !hasAudio && body.mode === 'manual' && !body.text?.trim()) {
       throw new BadRequestException('Texto é obrigatório no modo manual');
     }
     const rule = this.rulesRepo.create({
@@ -77,8 +82,12 @@ export class FollowupController {
       sendAtMinute: body.sendAtMinute != null ? Math.min(59, Math.max(0, body.sendAtMinute)) : 0,
       mode: body.mode === 'ai' ? 'ai' : 'manual',
       text: body.text || null,
-      videoId: body.videoId || null,
+      videoId: hasAudio ? null : body.videoId || null,
       videoCaptionOverride: body.videoCaptionOverride || null,
+      audioId: hasVideo ? null : body.audioId || null,
+      audioText: body.audioText || null,
+      audioOrder: body.audioOrder === 'text_first' ? 'text_first' : 'audio_first',
+      audioGapSeconds: body.audioGapSeconds != null ? Math.min(180, Math.max(0, Number(body.audioGapSeconds))) : 20,
       priority: body.priority ?? 0,
     });
     return this.rulesRepo.save(rule);
@@ -88,6 +97,11 @@ export class FollowupController {
   async updateRule(@Param('id') id: string, @Body() body: Partial<FollowupRule> & { resetCycle?: boolean }) {
     const rule = await this.rulesRepo.findOne({ where: { id } });
     if (!rule) throw new BadRequestException('Regra não encontrada');
+
+    // Checar ANTES de aplicar qualquer campo — se checássemos só no final, o
+    // "zerar o outro" abaixo sempre resolveria o conflito silenciosamente e o
+    // 400 nunca dispararia mesmo com os dois vindo preenchidos no mesmo body.
+    if (body.audioId && body.videoId) throw new BadRequestException('Escolha áudio OU vídeo, não os dois');
 
     if (body.name !== undefined) rule.name = body.name.trim();
     if (body.enabled !== undefined) rule.enabled = body.enabled;
@@ -100,12 +114,26 @@ export class FollowupController {
     if (body.sendAtMinute !== undefined) rule.sendAtMinute = body.sendAtMinute != null ? Math.min(59, Math.max(0, body.sendAtMinute)) : 0;
     if (body.mode !== undefined) rule.mode = body.mode === 'ai' ? 'ai' : 'manual';
     if (body.text !== undefined) rule.text = body.text || null;
-    if (body.videoId !== undefined) rule.videoId = body.videoId || null;
+    // audioId/videoId são mutuamente exclusivos — setar um zera o outro
+    // (defesa server-side; a UI já impede o usuário de marcar os dois).
+    if (body.videoId !== undefined) {
+      rule.videoId = body.videoId || null;
+      if (rule.videoId) rule.audioId = null;
+    }
     if (body.videoCaptionOverride !== undefined) rule.videoCaptionOverride = body.videoCaptionOverride || null;
+    if (body.audioId !== undefined) {
+      rule.audioId = body.audioId || null;
+      if (rule.audioId) rule.videoId = null;
+    }
+    if (body.audioText !== undefined) rule.audioText = body.audioText || null;
+    if (body.audioOrder !== undefined) rule.audioOrder = body.audioOrder === 'text_first' ? 'text_first' : 'audio_first';
+    if (body.audioGapSeconds !== undefined) rule.audioGapSeconds = Math.min(180, Math.max(0, Number(body.audioGapSeconds) || 0));
     if (body.priority !== undefined) rule.priority = body.priority;
 
-    // Só exige texto quando não tem vídeo (com vídeo, manda só o vídeo).
-    if (!rule.videoId && rule.mode === 'manual' && !rule.text?.trim() && rule.enabled) {
+    if (rule.audioId && rule.videoId) throw new BadRequestException('Escolha áudio OU vídeo, não os dois');
+
+    // Só exige texto quando não tem vídeo/áudio (com mídia, manda a mídia).
+    if (!rule.videoId && !rule.audioId && rule.mode === 'manual' && !rule.text?.trim() && rule.enabled) {
       throw new BadRequestException('Texto é obrigatório no modo manual');
     }
 
@@ -164,6 +192,51 @@ export class FollowupController {
   @Delete('videos/:id')
   async deleteVideo(@Param('id') id: string) {
     await this.videoService.delete(id);
+    return { ok: true };
+  }
+
+  // ─── Biblioteca de áudios ───────────────────────────────────────────
+
+  @Get('audios')
+  async listAudios() {
+    return this.audioService.list();
+  }
+
+  @Post('audios')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  async uploadAudio(
+    @UploadedFile() file: UploadedAudioFile,
+    @Body('name') name: string,
+    @Body('durationSeconds') durationSeconds?: string,
+  ) {
+    const seconds = durationSeconds != null ? parseInt(durationSeconds, 10) : undefined;
+    return this.audioService.upload(file, name, Number.isFinite(seconds) ? seconds : undefined);
+  }
+
+  @Patch('audios/:id')
+  async updateAudio(@Param('id') id: string, @Body() body: { name?: string }) {
+    return this.audioService.update(id, body);
+  }
+
+  @Delete('audios/:id')
+  async deleteAudio(@Param('id') id: string) {
+    await this.audioService.delete(id);
+    return { ok: true };
+  }
+
+  // Manda a nota de voz pra um número qualquer, sem tocar em lead/histórico —
+  // usado na biblioteca pra confirmar que virou bolha de áudio de verdade
+  // (e não um anexo de arquivo) antes de anexar a uma regra.
+  @Post('audios/:id/test')
+  async testAudio(@Param('id') id: string, @Body() body: { phone?: string }) {
+    if (!body?.phone?.trim()) throw new BadRequestException('Telefone é obrigatório');
+    const audio = await this.audioService.list().then((all) => all.find((a) => a.id === id));
+    if (!audio) throw new BadRequestException('Áudio não encontrado');
+    try {
+      await this.followupService.sendAudioTest(body.phone.trim(), audio);
+    } catch (err: any) {
+      throw new BadRequestException(err.message || 'Falha ao enviar áudio de teste');
+    }
     return { ok: true };
   }
 

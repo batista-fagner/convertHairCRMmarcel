@@ -12,6 +12,7 @@ import { IgCommentEvent } from './instagram-automation/ig-comment-event.entity';
 import { Setting } from './settings/setting.entity';
 import { FollowupRule } from './common/entities/followup-rule.entity';
 import { FollowupVideo } from './common/entities/followup-video.entity';
+import { FollowupAudio } from './common/entities/followup-audio.entity';
 import { SmsContact } from './sms/entities/sms-contact.entity';
 import { SmsMessage } from './sms/entities/sms-message.entity';
 import { IgPost } from './ig-posts/ig-post.entity';
@@ -49,7 +50,7 @@ import { BulkMessageModule } from './bulk-message/bulk-message.module';
         // Supabase exige SSL; `DATABASE_SSL=false` permite apontar para um
         // Postgres local descartável ao testar sem tocar em produção.
         ssl: config.get('DATABASE_SSL') === 'false' ? false : { rejectUnauthorized: false },
-        entities: [Lead, Campaign, Form, InstagramAutomation, IgConversation, IgMessage, IgCommentEvent, Setting, FollowupRule, FollowupVideo, SmsContact, SmsMessage, IgPost, Appointment, AvailabilityRule, BulkCampaign],
+        entities: [Lead, Campaign, Form, InstagramAutomation, IgConversation, IgMessage, IgCommentEvent, Setting, FollowupRule, FollowupVideo, FollowupAudio, SmsContact, SmsMessage, IgPost, Appointment, AvailabilityRule, BulkCampaign],
         synchronize: true,
         logging: false,
         timezone: 'Z',

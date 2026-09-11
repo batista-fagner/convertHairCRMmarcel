@@ -7,8 +7,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import OpenAI from 'openai';
 import { Lead } from '../common/entities/lead.entity';
-import { FollowupRule } from '../common/entities/followup-rule.entity';
+import { FollowupRule, FollowupAudioOrder } from '../common/entities/followup-rule.entity';
 import { FollowupVideo } from '../common/entities/followup-video.entity';
+import { FollowupAudio } from '../common/entities/followup-audio.entity';
 import { Appointment } from '../common/entities/appointment.entity';
 import { SettingsService } from '../settings/settings.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -160,6 +161,8 @@ export class SdrFollowupService {
     private rulesRepo: Repository<FollowupRule>,
     @InjectRepository(FollowupVideo)
     private videoRepo: Repository<FollowupVideo>,
+    @InjectRepository(FollowupAudio)
+    private audioRepo: Repository<FollowupAudio>,
     @InjectRepository(Appointment)
     private appointmentsRepo: Repository<Appointment>,
     private settings: SettingsService,
@@ -272,6 +275,42 @@ export class SdrFollowupService {
       // esse momento já passou há dias, "a partir de agora" ficaria sempre
       // verdadeiro e dispararia na hora em vez de esperar o horário certo.
       if (rule.sendAtHour != null && !this.isWithinSendWindow(rule.sendAtHour, rule.sendAtMinute ?? 0)) {
+        continue;
+      }
+
+      // Regra com áudio: manda a nota de voz + texto, sem teto diário (decisão
+      // do usuário — a especificidade da regra é a única proteção do número).
+      // Reserva o lead ANTES de enviar (evita double-send se o par áudio+texto
+      // com gap+jitter passar dos 5min do cron e a próxima execução repegar o
+      // mesmo lead ainda com followup_sent_at IS NULL).
+      if (rule.audioId) {
+        const audio = await this.audioRepo.findOne({ where: { id: rule.audioId } });
+        if (!audio) {
+          this.logger.warn(`[Followup] Regra ${rule.id} aponta pra áudio inexistente (${rule.audioId}) — pulando`);
+          continue;
+        }
+
+        if (sent > 0) {
+          await this.sleep(5000 + Math.random() * 5000);
+        }
+
+        const claim = await this.leadsRepo
+          .createQueryBuilder()
+          .update(Lead)
+          .set({ followupSentAt: new Date() })
+          .where('id = :id', { id: lead.id })
+          .andWhere('followup_sent_at IS NULL')
+          .execute();
+        if (!claim.affected) continue; // outra execução do cron já pegou esse lead
+
+        const text = (rule.audioText ?? '').trim();
+        const ok = await this.sendFollowupAudio(lead, audio, text, rule.audioOrder, rule.audioGapSeconds);
+        if (!ok) {
+          // Nenhuma mensagem saiu — devolve a reserva pra tentar de novo no próximo tick.
+          await this.leadsRepo.update(lead.id, { followupSentAt: null });
+          continue;
+        }
+        sent++;
         continue;
       }
 
@@ -1055,10 +1094,10 @@ ${cadenceTomBlock(!!guide)}`;
     }
   }
 
-  private async sendFollowupVideo(lead: Lead, videoUrl: string, caption: string, videoName: string) {
+  private async sendFollowupVideo(lead: Lead, videoUrl: string, caption: string, videoName: string): Promise<boolean> {
     if (!this.uazapiToken) {
       this.logger.warn(`[Followup] Token SDR não configurado — vídeo não enviado para ${lead.phone}`);
-      return;
+      return false;
     }
 
     try {
@@ -1096,8 +1135,126 @@ ${cadenceTomBlock(!!guide)}`;
       if (fresh) this.realtime.emitLeadUpdated(fresh);
 
       this.logger.log(`[Followup] Vídeo "${videoName}" enviado para ${lead.phone}`);
+      return true;
     } catch (err: any) {
       this.logger.error(`[Followup] Erro ao enviar vídeo para ${lead.phone}: ${err.message}`);
+      return false;
     }
+  }
+
+  /**
+   * Anexa uma entrada ao aiContext relendo o lead do banco antes — usado pelo
+   * áudio porque as duas mensagens (áudio + texto) são separadas por um sleep
+   * configurável: se um append usasse o `lead` em memória do início do método,
+   * o segundo sobrescreveria o primeiro e apagaria qualquer resposta que o
+   * lead tenha mandado durante o intervalo (o webhook grava direto no banco).
+   */
+  private async appendContext(leadId: string, entry: Record<string, any>, patch: Partial<Lead> = {}): Promise<Lead | null> {
+    const current = await this.leadsRepo.findOne({ where: { id: leadId } });
+    if (!current) return null;
+    const ctx = Array.isArray(current.aiContext) ? current.aiContext : [];
+    await this.leadsRepo.update(leadId, { ...patch, aiContext: [...ctx, entry] });
+    return this.leadsRepo.findOne({ where: { id: leadId } });
+  }
+
+  /** Envia a nota de voz (ptt) pra um número qualquer, sem tocar em lead/histórico — usado só pelo endpoint de teste da biblioteca de áudios. */
+  async sendAudioTest(phone: string, audio: FollowupAudio): Promise<void> {
+    if (!this.uazapiToken) throw new Error('SDR_UAZAPI_TOKEN não configurado');
+    await firstValueFrom(
+      this.http.post(
+        `${this.uazapiBaseUrl}/send/media`,
+        { number: phone, type: 'ptt', file: audio.publicUrl, mimetype: audio.mimeType, delay: 1000 },
+        { headers: { token: this.uazapiToken } },
+      ),
+    );
+  }
+
+  /**
+   * Manda a nota de voz (ptt) + a mensagem de texto que a explica, na ordem e
+   * com o intervalo configurados na regra. Retorna true só se ao menos a
+   * primeira mensagem saiu — ver política de falha parcial no comentário
+   * dentro do método.
+   */
+  private async sendFollowupAudio(
+    lead: Lead,
+    audio: FollowupAudio,
+    text: string,
+    order: FollowupAudioOrder,
+    gapSeconds: number,
+  ): Promise<boolean> {
+    if (!this.uazapiToken) {
+      this.logger.warn(`[Followup] Token SDR não configurado — áudio não enviado para ${lead.phone}`);
+      return false;
+    }
+
+    const phone = lead.phone; // já vem completo (com DDI correto) — não prefixar 55.
+    const gapMs = Math.min(Math.max(gapSeconds, 0), 180) * 1000;
+    const hasText = text.trim().length > 0;
+
+    const sendAudioMsg = async () => {
+      await firstValueFrom(
+        this.http.post(
+          `${this.uazapiBaseUrl}/send/media`,
+          { number: phone, type: 'ptt', file: audio.publicUrl, mimetype: audio.mimeType, delay: 1000 },
+          { headers: { token: this.uazapiToken } },
+        ),
+      );
+      const fresh = await this.appendContext(lead.id, {
+        role: 'assistant',
+        content: `[sistema: áudio "${audio.name}" enviado no follow-up]`,
+        mediaType: 'audio',
+        mediaUrl: audio.publicUrl,
+        filename: audio.name,
+        timestamp: new Date().toISOString(),
+      }, { waLastMessageAt: new Date() });
+      if (fresh) this.realtime.emitLeadUpdated(fresh);
+    };
+
+    const sendTextMsg = async () => {
+      await firstValueFrom(
+        this.http.post(
+          `${this.uazapiBaseUrl}/send/text`,
+          { number: phone, text },
+          { headers: { token: this.uazapiToken } },
+        ),
+      );
+      const fresh = await this.appendContext(lead.id, {
+        role: 'assistant',
+        content: text,
+        timestamp: new Date().toISOString(),
+      }, { waLastMessageAt: new Date() });
+      if (fresh) this.realtime.emitLeadUpdated(fresh);
+    };
+
+    // Sem texto, a ordem não importa — só o áudio sai.
+    const first = order === 'text_first' && hasText ? sendTextMsg : sendAudioMsg;
+    const second = order === 'text_first' && hasText ? sendAudioMsg : sendTextMsg;
+
+    // A 1ª mensagem falhando aborta tudo — nada chegou no lead, o chamador
+    // devolve a reserva de followup_sent_at pra tentar de novo no próximo tick.
+    try {
+      await first();
+    } catch (err: any) {
+      this.logger.error(`[Followup] Erro ao enviar áudio para ${lead.phone}: ${err.message}`);
+      return false;
+    }
+
+    if (!hasText) {
+      this.logger.log(`[Followup] Áudio "${audio.name}" enviado para ${lead.phone} (sem texto)`);
+      return true;
+    }
+
+    if (gapMs > 0) await this.sleep(gapMs);
+
+    // A 2ª mensagem falhando não desfaz a 1ª: o áudio já chegou, e remandar o
+    // par reenviaria a nota de voz — pior do que só faltar o texto. Fica
+    // marcado como enviado mesmo assim; o erro fica logado pra investigação.
+    try {
+      await second();
+      this.logger.log(`[Followup] Áudio "${audio.name}" + texto enviados para ${lead.phone}`);
+    } catch (err: any) {
+      this.logger.error(`[Followup] Áudio OK mas texto FALHOU para ${lead.phone}: ${err.message}`);
+    }
+    return true;
   }
 }

@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { KanbanStage } from './lead.entity';
 
 export type FollowupMode = 'manual' | 'ai';
+export type FollowupAudioOrder = 'audio_first' | 'text_first';
 
 // kanbanStage/utmCampaign nulos = curinga (casa com qualquer raia/campanha).
 // O matching escolhe a regra mais específica pra cada lead (ver sdr-followup.service.ts).
@@ -59,6 +60,26 @@ export class FollowupRule {
   // Legenda específica desta regra; se null, usa a caption padrão do vídeo.
   @Column({ name: 'video_caption_override', type: 'text', nullable: true })
   videoCaptionOverride?: string | null;
+
+  // Se preenchido, a regra manda esse áudio como nota de voz (ptt) seguido da
+  // mensagem de texto (audioText) — mode/text/videoId passam a ser ignorados.
+  // Mutuamente exclusivo com videoId (validado no controller). FK lógica pro
+  // FollowupAudio. Sem teto diário (diferente do vídeo) — decisão do usuário.
+  @Column({ name: 'audio_id', type: 'uuid', nullable: true })
+  audioId?: string | null;
+
+  // Mensagem que acompanha o áudio. Vazio/null = manda só o áudio, sem texto.
+  @Column({ name: 'audio_text', type: 'text', nullable: true })
+  audioText?: string | null;
+
+  // Ordem de envio das duas mensagens.
+  @Column({ name: 'audio_order', type: 'varchar', default: 'audio_first' })
+  audioOrder: FollowupAudioOrder;
+
+  // Intervalo (segundos) entre o áudio e o texto. Clamp 0-180 no controller —
+  // o envio bloqueia o cron, então não pode ser um valor arbitrariamente alto.
+  @Column({ name: 'audio_gap_seconds', type: 'int', default: 20 })
+  audioGapSeconds: number;
 
   // Desempate manual quando duas regras têm a mesma especificidade pro mesmo lead (menor = prioridade maior).
   @Column({ name: 'priority', type: 'int', default: 0 })

@@ -8,10 +8,12 @@ import { WhatsappInstanceController } from './whatsapp-instance.controller';
 import { SdrService } from './sdr.service';
 import { SdrFollowupService } from './sdr-followup.service';
 import { FollowupVideoService } from './followup-video.service';
+import { FollowupAudioService } from './followup-audio.service';
 import { SdrWebhookGuardService } from './sdr-webhook-guard.service';
 import { Lead } from '../common/entities/lead.entity';
 import { FollowupRule } from '../common/entities/followup-rule.entity';
 import { FollowupVideo } from '../common/entities/followup-video.entity';
+import { FollowupAudio } from '../common/entities/followup-audio.entity';
 import { Appointment } from '../common/entities/appointment.entity';
 import { LeadsModule } from '../leads/leads.module';
 import { FacebookModule } from '../facebook/facebook.module';
@@ -23,7 +25,7 @@ import { AppointmentsModule } from '../appointments/appointments.module';
 @Module({
   imports: [
     HttpModule,
-    TypeOrmModule.forFeature([Lead, FollowupRule, FollowupVideo, Appointment]),
+    TypeOrmModule.forFeature([Lead, FollowupRule, FollowupVideo, FollowupAudio, Appointment]),
     LeadsModule,
     FacebookModule,
     RealtimeModule,
@@ -32,7 +34,7 @@ import { AppointmentsModule } from '../appointments/appointments.module';
     AppointmentsModule,
   ],
   controllers: [SdrController, FollowupController, ManualMessageController, WhatsappInstanceController],
-  providers: [SdrService, SdrFollowupService, FollowupVideoService, SdrWebhookGuardService],
+  providers: [SdrService, SdrFollowupService, FollowupVideoService, FollowupAudioService, SdrWebhookGuardService],
   exports: [SdrFollowupService],
 })
 export class SdrModule {}
