@@ -13,6 +13,7 @@ import FormPublic from './pages/FormPublic'
 import InstagramAutomation from './pages/InstagramAutomation'
 import Content from './pages/Content'
 import Videos from './pages/Videos'
+import Audios from './pages/Audios'
 import InstagramPosts from './pages/InstagramPosts'
 import KanbanLeads from './pages/KanbanLeads'
 import CalendarPage from './pages/CalendarPage'
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/ig-inbox" element={<IgInbox />} />
           <Route path="/content" element={<Content />} />
           <Route path="/videos" element={<Videos />} />
+          <Route path="/audios" element={<Audios />} />
           <Route path="/instagram-posts" element={<InstagramPosts />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

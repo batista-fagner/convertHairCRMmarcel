@@ -18,6 +18,7 @@ import {
   MessageCircle,
   Sparkles,
   Video,
+  Mic,
   Image,
   LogOut,
   MessageSquare,
@@ -73,6 +74,7 @@ const NAV_GROUPS = [
     items: [
       { icon: Sparkles, label: 'Carrossel IG', path: '/content', disabled: true },
       { icon: Video, label: 'Vídeos', path: '/videos' },
+      { icon: Mic, label: 'Áudios', path: '/audios' },
       { icon: Image, label: 'Posts IG', path: '/instagram-posts', disabled: true },
     ],
   },
@@ -99,6 +101,7 @@ const PAGE_TITLES = {
   '/ig-inbox': 'Instagram DM Inbox',
   '/content': 'Carrossel IG',
   '/videos': 'Vídeos de Follow-up',
+  '/audios': 'Áudios de Follow-up',
   '/instagram-posts': 'Posts no Instagram',
   '/kanban': 'Kanban de Leads',
   '/agenda': 'Agenda',

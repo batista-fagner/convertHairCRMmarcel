@@ -444,13 +444,21 @@ export default function LeadConversationPanel({
                     className="rounded-lg mb-1.5 max-w-full max-h-56"
                   />
                 )}
-                {m.mediaType && !(m.mediaType === 'image' && m.base64) && !(m.mediaType === 'video' && m.mediaUrl) && (
+                {m.mediaType === 'audio' && (m.mediaUrl || m.base64) && (
+                  <audio
+                    src={m.mediaUrl || (m.base64.startsWith('data:') ? m.base64 : `data:audio/ogg;base64,${m.base64}`)}
+                    controls
+                    preload="metadata"
+                    className="mb-1.5 max-w-full h-9"
+                  />
+                )}
+                {m.mediaType && !(m.mediaType === 'image' && m.base64) && !(m.mediaType === 'video' && m.mediaUrl) && !(m.mediaType === 'audio' && (m.mediaUrl || m.base64)) && (
                   <div className="flex items-center gap-1.5 mb-1 opacity-90">
                     {mediaIcon(m.mediaType)}
                     <span className="text-xs font-medium truncate max-w-[180px]">{m.filename || m.mediaType}</span>
                   </div>
                 )}
-                {m.mediaType === 'video' && m.mediaUrl ? (
+                {(m.mediaType === 'video' || m.mediaType === 'audio') && (m.mediaUrl || m.base64) ? (
                   m.caption && <p className="whitespace-pre-wrap">{m.caption}</p>
                 ) : (
                   m.content && <p className="whitespace-pre-wrap">{m.content}</p>

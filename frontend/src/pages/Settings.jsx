@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Calendar, ChevronLeft, ChevronRight, X, Info } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Mic, Calendar, ChevronLeft, ChevronRight, X, Info, AlertTriangle } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
@@ -667,7 +667,7 @@ function IgCatchallEditor() {
   )
 }
 
-const EMPTY_RULE = { name: '', enabled: true, kanbanStage: '', utmCampaign: '', adTitle: '', createdAfter: '', delayMinutes: 60, sendAtHour: '', sendAtMinute: 0, mode: 'manual', text: '', videoId: '', videoCaptionOverride: '' }
+const EMPTY_RULE = { name: '', enabled: true, kanbanStage: '', utmCampaign: '', adTitle: '', createdAfter: '', delayMinutes: 60, sendAtHour: '', sendAtMinute: 0, mode: 'manual', text: '', videoId: '', videoCaptionOverride: '', audioId: '', audioText: '', audioOrder: 'audio_first', audioGapSeconds: 20 }
 
 // 'YYYY-MM-DDTHH:mm' no fuso local, pro valor inicial do <input type="datetime-local">.
 function todayStartLocal() {
@@ -677,7 +677,7 @@ function todayStartLocal() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`
 }
 
-function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, onCancel, onSaved }) {
+function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, audios, onCancel, onSaved }) {
   const [rule, setRule] = useState(initial)
   const [resetCycle, setResetCycle] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -689,12 +689,14 @@ function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, on
     : `${rule.delayMinutes}min`
 
   const hasVideo = Boolean(rule.videoId)
+  const hasAudio = Boolean(rule.audioId)
   const selectedVideo = videos.find(v => v.id === rule.videoId)
+  const selectedAudio = audios.find(a => a.id === rule.audioId)
 
   const save = async () => {
     setError('')
     if (!rule.name.trim()) { setError('Dê um nome pra regra'); return }
-    if (!hasVideo && rule.mode === 'manual' && !rule.text.trim()) { setError('Texto é obrigatório no modo manual'); return }
+    if (!hasVideo && !hasAudio && rule.mode === 'manual' && !rule.text.trim()) { setError('Texto é obrigatório no modo manual'); return }
     setSaving(true)
     try {
       const payload = {
@@ -711,6 +713,10 @@ function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, on
         text: rule.text || null,
         videoId: rule.videoId || null,
         videoCaptionOverride: rule.videoCaptionOverride || null,
+        audioId: rule.audioId || null,
+        audioText: rule.audioText || null,
+        audioOrder: rule.audioOrder === 'text_first' ? 'text_first' : 'audio_first',
+        audioGapSeconds: Math.min(180, Math.max(0, parseInt(rule.audioGapSeconds, 10) || 0)),
         resetCycle,
       }
       const res = await fetch(`${API}/followup/rules${isEditing ? `/${rule.id}` : ''}`, {
@@ -869,20 +875,35 @@ function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, on
         </p>
       </div>
 
-      {/* Vídeo (opcional) — se escolhido, manda só o vídeo com legenda */}
-      <div className="mb-4">
-        <label className="block text-xs font-medium text-slate-600 mb-1.5">Anexar vídeo (opcional)</label>
-        <select
-          value={rule.videoId}
-          onChange={e => setRule(r => ({ ...r, videoId: e.target.value }))}
-          className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
-        >
-          <option value="">Nenhum (mandar texto)</option>
-          {videos.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-        </select>
-        {hasVideo && (
-          <p className="text-[10px] text-slate-400 mt-1">
-            Com vídeo, a regra manda só o vídeo com legenda — a mensagem de texto (IA/fixa) é ignorada. Respeita o teto diário de vídeos.
+      {/* Mídia (opcional) — vídeo ou áudio são mutuamente exclusivos; escolher um limpa o outro */}
+      <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">Anexar vídeo (opcional)</label>
+          <select
+            value={rule.videoId}
+            onChange={e => setRule(r => ({ ...r, videoId: e.target.value, audioId: e.target.value ? '' : r.audioId }))}
+            className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+          >
+            <option value="">Nenhum</option>
+            {videos.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1.5">Anexar áudio (opcional)</label>
+          <select
+            value={rule.audioId}
+            onChange={e => setRule(r => ({ ...r, audioId: e.target.value, videoId: e.target.value ? '' : r.videoId }))}
+            className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+          >
+            <option value="">Nenhum</option>
+            {audios.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        {(hasVideo || hasAudio) && (
+          <p className="text-[10px] text-slate-400 sm:col-span-2">
+            {hasVideo
+              ? 'Com vídeo, a regra manda só o vídeo com legenda — a mensagem de texto (IA/fixa) é ignorada. Respeita o teto diário de vídeos.'
+              : 'Com áudio, a regra manda a nota de voz + a mensagem que a explica, na ordem e intervalo configurados abaixo — sem teto diário.'}
           </p>
         )}
       </div>
@@ -897,6 +918,60 @@ function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, on
             placeholder={selectedVideo?.caption ? `Legenda padrão: ${selectedVideo.caption}` : 'Deixe vazio pra usar a legenda padrão do vídeo'}
             className="w-full text-sm border border-slate-200 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-violet-300"
           />
+        </div>
+      ) : hasAudio ? (
+        <div className="mb-4 space-y-3">
+          <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-2.5">
+            <Mic className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+            <audio src={selectedAudio?.publicUrl} controls className="w-full h-8" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Mensagem que acompanha o áudio</label>
+            <textarea
+              value={rule.audioText}
+              onChange={e => setRule(r => ({ ...r, audioText: e.target.value }))}
+              rows={3}
+              placeholder="Ex: Manda um áudio explicando melhor como funciona — dá uma escutada! Deixe vazio pra mandar só o áudio, sem texto."
+              className="w-full text-sm border border-slate-200 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Ordem</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setRule(r => ({ ...r, audioOrder: 'audio_first' }))}
+                  className={`flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition ${rule.audioOrder !== 'text_first' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+                >
+                  Áudio → texto
+                </button>
+                <button
+                  onClick={() => setRule(r => ({ ...r, audioOrder: 'text_first' }))}
+                  className={`flex-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition ${rule.audioOrder === 'text_first' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+                >
+                  Texto → áudio
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Intervalo entre as duas (segundos)</label>
+              <input
+                type="number"
+                min={0}
+                max={180}
+                value={rule.audioGapSeconds}
+                onChange={e => setRule(r => ({ ...r, audioGapSeconds: Math.min(180, Math.max(0, parseInt(e.target.value, 10) || 0)) }))}
+                className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            </div>
+          </div>
+          {rule.audioText?.trim() && (
+            <p className="text-[10px] text-slate-400">
+              {rule.audioOrder === 'text_first'
+                ? `💬 texto → espera ${rule.audioGapSeconds}s → 🎤 áudio`
+                : `🎤 áudio → espera ${rule.audioGapSeconds}s → 💬 texto`}
+            </p>
+          )}
         </div>
       ) : (
         <>
@@ -956,6 +1031,11 @@ function FollowupRuleForm({ initial, campaignOptions, adTitleOptions, videos, on
           />
           <span className="text-[11px] text-slate-600">
             <span className="font-medium text-slate-700">Disparar novo ciclo</span> — reenvia pros leads desta raia/campanha que já receberam follow-up e ainda não responderam. Marque ao reconfigurar.
+            {hasAudio && resetCycle && (
+              <span className="flex items-center gap-1 text-amber-700 font-medium mt-1">
+                <AlertTriangle className="w-3 h-3 flex-shrink-0" /> Vai reenviar a mesma nota de voz pra quem já recebeu — mais chamativo que repetir um texto.
+              </span>
+            )}
           </span>
         </label>
       )}
@@ -983,6 +1063,7 @@ function FollowupRules() {
   const [campaignOptions, setCampaignOptions] = useState([])
   const [adTitleOptions, setAdTitleOptions] = useState([])
   const [videos, setVideos] = useState([])
+  const [audios, setAudios] = useState([])
   const [videoLimit, setVideoLimit] = useState(15)
   const [savingLimit, setSavingLimit] = useState(false)
   const [limitSaved, setLimitSaved] = useState(false)
@@ -998,13 +1079,15 @@ function FollowupRules() {
       fetch(`${API}/followup/ad-title-options`).then(r => r.json()),
       fetch(`${API}/followup/videos`).then(r => r.json()),
       fetch(`${API}/followup/video-limit`).then(r => r.json()),
+      fetch(`${API}/followup/audios`).then(r => r.json()),
     ])
-      .then(([rulesData, campaignsData, adTitlesData, videosData, limitData]) => {
+      .then(([rulesData, campaignsData, adTitlesData, videosData, limitData, audiosData]) => {
         setRules(Array.isArray(rulesData) ? rulesData : [])
         setCampaignOptions(Array.isArray(campaignsData) ? campaignsData : [])
         setAdTitleOptions(Array.isArray(adTitlesData) ? adTitlesData : [])
         setVideos(Array.isArray(videosData) ? videosData : [])
         if (limitData?.limit) setVideoLimit(limitData.limit)
+        setAudios(Array.isArray(audiosData) ? audiosData : [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -1084,6 +1167,7 @@ function FollowupRules() {
           campaignOptions={campaignOptions}
           adTitleOptions={adTitleOptions}
           videos={videos}
+          audios={audios}
           onCancel={() => setEditingId(null)}
           onSaved={onSaved}
         />
@@ -1111,10 +1195,15 @@ function FollowupRules() {
                 text: rule.text || '',
                 videoId: rule.videoId || '',
                 videoCaptionOverride: rule.videoCaptionOverride || '',
+                audioId: rule.audioId || '',
+                audioText: rule.audioText || '',
+                audioOrder: rule.audioOrder || 'audio_first',
+                audioGapSeconds: rule.audioGapSeconds ?? 20,
               }}
               campaignOptions={campaignOptions}
               adTitleOptions={adTitleOptions}
               videos={videos}
+              audios={audios}
               onCancel={() => setEditingId(null)}
               onSaved={onSaved}
             />
@@ -1152,7 +1241,11 @@ function FollowupRules() {
                       <Clock className="w-2.5 h-2.5" /> {String(rule.sendAtHour).padStart(2, '0')}:{String(rule.sendAtMinute ?? 0).padStart(2, '0')}
                     </span>
                   )}
-                  {rule.videoId ? (
+                  {rule.audioId ? (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-600">
+                      <Mic className="w-2.5 h-2.5" /> {audios.find(a => a.id === rule.audioId)?.name || 'Áudio'}
+                    </span>
+                  ) : rule.videoId ? (
                     <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-pink-50 text-pink-600">
                       <Video className="w-2.5 h-2.5" /> {videos.find(v => v.id === rule.videoId)?.name || 'Vídeo'}
                     </span>
