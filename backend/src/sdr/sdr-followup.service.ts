@@ -930,7 +930,13 @@ ${tomBlock}`;
         messages: [
           { role: 'system', content: basePrompt },
           ...history,
-          { role: 'system', content: followupInstruction },
+          // 'user', não 'system': o Gemini (endpoint OpenAI-compatible) rejeita
+          // com 400 (sem corpo no erro) qualquer conversa que termine em
+          // 'system' logo depois de um 'assistant' — e aqui SEMPRE termina em
+          // assistant (é follow-up: a IA falou, o lead não respondeu). Achado
+          // 2026-09-12 depurando por que a cadência nunca enviava nada — todas
+          // as 3 gerações de follow-up (aqui e mais duas abaixo) tinham esse bug.
+          { role: 'user', content: followupInstruction },
         ],
         temperature: 0.8,
         max_completion_tokens: 150,
@@ -988,7 +994,8 @@ ${cadenceTomBlock(!!guide)}`;
         messages: [
           { role: 'system', content: basePrompt },
           ...history,
-          { role: 'system', content: instruction },
+          // 'user', não 'system' — ver comentário em generateAiFollowup() acima.
+          { role: 'user', content: instruction },
         ],
         temperature: 0.8,
         max_completion_tokens: 150,
@@ -1048,7 +1055,8 @@ ${cadenceTomBlock(!!guide)}`;
         messages: [
           { role: 'system', content: basePrompt },
           ...history,
-          { role: 'system', content: instruction },
+          // 'user', não 'system' — ver comentário em generateAiFollowup() acima.
+          { role: 'user', content: instruction },
         ],
         temperature: 0.8,
         max_completion_tokens: 150,
