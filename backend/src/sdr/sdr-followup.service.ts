@@ -233,6 +233,25 @@ export class SdrFollowupService {
 
   @Cron('*/5 * * * *')
   async checkFollowups() {
+    // Lease de 4min pra um cron de 5 em 5 — impede 2 execuções sobrepostas
+    // (ex.: deploy no Railway sobrepondo container antigo/novo, ou um scan
+    // lento por causa de muito lead due) processarem o mesmo tick e
+    // duplicarem envio de WhatsApp pro mesmo lead. Release explícito no
+    // finally evita que uma execução rápida fique bloqueando os próximos
+    // ticks até o lease inteiro expirar. Mesmo padrão do convertHairCRM.
+    const gotLock = await this.settings.tryAcquireLock('followup_cron_lock', 4 * 60_000);
+    if (!gotLock) {
+      this.logger.warn('[Followup] Outra execução já está processando este tick — pulando (evita duplicidade)');
+      return;
+    }
+    try {
+      await this.runCheckFollowups();
+    } finally {
+      await this.settings.releaseLock('followup_cron_lock');
+    }
+  }
+
+  private async runCheckFollowups() {
     this.lastRunAt = new Date();
     await this.ensureRulesSeeded();
 
@@ -601,6 +620,29 @@ export class SdrFollowupService {
   // — só a orquestração de múltiplos toques + a mensagem são novas.
   @Cron(CronExpression.EVERY_MINUTE)
   async processNurtureCadence(): Promise<void> {
+    // Lease generoso (10min) porque, com muito lead due de uma vez (backlog
+    // represado), processar tudo pode legitimamente passar de 1 minuto — sem
+    // essa trava, o próximo tick (1 min depois) começa em cima do anterior
+    // ainda rodando, e cada execução respeita seu próprio jitter de 5-10s sem
+    // coordenação entre si, mandando follow-ups mais rápido que o pretendido
+    // (achado 2026-09-12: 11 de 23 envios saíram com menos de 5s de intervalo,
+    // um deles com só 1s, ao desbloquear ~40 leads represados de uma vez).
+    // Release explícito no finally evita que uma execução rápida (sem due)
+    // fique bloqueando os próximos 10 ticks. Mesmo padrão do checkFollowups
+    // acima / do convertHairCRM.
+    const gotLock = await this.settings.tryAcquireLock('nurture_cadence_lock', 10 * 60_000);
+    if (!gotLock) {
+      this.logger.warn('[CADENCE] Outra execução já está processando — pulando (evita rajada sem o jitter configurado)');
+      return;
+    }
+    try {
+      await this.runNurtureCadence();
+    } finally {
+      await this.settings.releaseLock('nurture_cadence_lock');
+    }
+  }
+
+  private async runNurtureCadence(): Promise<void> {
     const cadence = await this.getCadenceConfig();
     if (!cadence.enabled) return;
     if (!this.isWithinCadenceWindow(cadence)) return;

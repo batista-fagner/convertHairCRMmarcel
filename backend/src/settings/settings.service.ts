@@ -57,6 +57,43 @@ export class SettingsService {
   }
 
   /**
+   * Lock por lease na própria tabela settings — sem Redis, sem infra nova.
+   * Usado pelos crons de follow-up/cadência (sdr-followup.service.ts) pra
+   * impedir que uma execução comece antes da anterior terminar quando há
+   * muito lead devido de uma vez (achado 2026-09-12: com o backlog represado
+   * pelos bugs de tags NULL + role do Gemini corrigido, processNurtureCadence
+   * — cron de 1 em 1 min — passou de 1 min pra processar tudo e sobrepôs a
+   * própria execução, mandando alguns follow-ups com menos de 5s de intervalo
+   * em vez dos 5-10s configurados). Mesmo padrão já validado em produção no
+   * convertHairCRM (backend/src/settings/settings.service.ts).
+   */
+  async tryAcquireLock(key: string, leaseMs: number): Promise<boolean> {
+    const now = new Date();
+    const leaseExpiredBefore = new Date(now.getTime() - leaseMs);
+    const result = await this.settingsRepo.manager.query(
+      `INSERT INTO settings (key, value, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (key) DO UPDATE
+         SET value = EXCLUDED.value, updated_at = now()
+         WHERE settings.value IS NULL OR settings.value::timestamptz < $3
+       RETURNING key`,
+      [key, now.toISOString(), leaseExpiredBefore.toISOString()],
+    );
+    return result.length > 0;
+  }
+
+  /**
+   * Libera um lock adquirido por tryAcquireLock antes do lease expirar —
+   * usado no `finally` de quem chama, pra que uma execução rápida (poucos
+   * leads devidos) não fique bloqueando o próximo tick desnecessariamente.
+   * Sem isso, um lease generoso o bastante pra cobrir backlog grande faria o
+   * cron de 1 em 1 min (processNurtureCadence) rodar de fato só a cada N min.
+   */
+  async releaseLock(key: string): Promise<void> {
+    await this.settingsRepo.upsert({ key, value: new Date(0).toISOString() }, ['key']);
+  }
+
+  /**
    * Fonte única do client OpenAI-compatível usado pra chamar a IA (Clara).
    * Só funciona com a chave que o próprio cliente configurou em
    * Configurações → Provedor de IA — não existe fallback pra chave padrão da
