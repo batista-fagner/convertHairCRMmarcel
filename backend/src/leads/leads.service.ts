@@ -54,7 +54,10 @@ export class LeadsService {
     if (maxOpeningAttempts != null) query.andWhere('lead.opening_attempts < :maxOpeningAttempts', { maxOpeningAttempts });
     // Tags que pausam a IA (Settings → Tags) — lead com qualquer uma delas não
     // recebe abertura proativa (ver AI_DISABLED_TAGS_KEY em settings.service.ts).
-    if (excludeTags?.length) query.andWhere('NOT (lead.tags ?| :excludeTags::text[])', { excludeTags });
+    // lead.tags IS NULL precisa passar — sem o OR, "NOT (NULL ?| array)" vira
+    // NULL no Postgres e a linha some do WHERE mesmo sem tag proibida (mesmo
+    // bug do checkFollowups em sdr-followup.service.ts, achado 2026-09-11).
+    if (excludeTags?.length) query.andWhere('(lead.tags IS NULL OR NOT (lead.tags ?| :excludeTags::text[]))', { excludeTags });
     return query.getMany();
   }
 

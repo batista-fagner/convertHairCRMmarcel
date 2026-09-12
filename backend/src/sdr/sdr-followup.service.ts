@@ -254,7 +254,12 @@ export class SdrFollowupService {
       .andWhere('lead.ai_paused = false')
       .andWhere('lead.wa_last_message_at IS NOT NULL')
       .andWhere('lead.followup_sent_at IS NULL');
-    if (disabledTags.length) candidatesQuery.andWhere('NOT (lead.tags ?| :disabledTags::text[])', { disabledTags });
+    // lead.tags IS NULL precisa passar (nunca tagueado = sem tag proibida) —
+    // sem esse OR, "NOT (NULL ?| array)" avalia pra NULL no Postgres e a linha
+    // inteira é excluída do WHERE, mesmo sem nenhuma tag. Bug real encontrado
+    // 2026-09-11 testando o follow-up de áudio: 109/110 leads têm tags NULL e
+    // nenhum deles disparava follow-up desde que a tag "aluno" foi configurada.
+    if (disabledTags.length) candidatesQuery.andWhere('(lead.tags IS NULL OR NOT (lead.tags ?| :disabledTags::text[]))', { disabledTags });
     const candidates = await candidatesQuery.getMany();
 
     const videoLimit = await this.getVideoLimit();
@@ -609,7 +614,8 @@ export class SdrFollowupService {
       .andWhere('lead.nurture_paused = false')
       .andWhere('lead.next_nurture_at IS NOT NULL')
       .andWhere('lead.next_nurture_at <= :now', { now: new Date() });
-    if (disabledTags.length) dueLeadsQuery.andWhere('NOT (lead.tags ?| :disabledTags::text[])', { disabledTags });
+    // Ver comentário equivalente em checkFollowups() — mesmo bug de tags NULL.
+    if (disabledTags.length) dueLeadsQuery.andWhere('(lead.tags IS NULL OR NOT (lead.tags ?| :disabledTags::text[]))', { disabledTags });
     const dueLeads = await dueLeadsQuery.getMany();
 
     let sent = 0;
