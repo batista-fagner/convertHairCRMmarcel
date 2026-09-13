@@ -1119,13 +1119,21 @@ ${cadenceTomBlock(!!guide)}`;
       return false;
     }
 
+    // A IA usa o mesmo prompt-base da Clara, que instrui separar respostas em
+    // "bolhas" com "|||" (ver sdr.prompt.ts). No chat ao vivo isso vira várias
+    // mensagens reais (sendReplyAsBubbles); aqui o follow-up sempre foi 1
+    // mensagem só, então só troca o marcador por quebra de linha — sem isso
+    // o "|||" cru ia parar tanto no WhatsApp do lead quanto no histórico do CRM
+    // (achado 2026-09-13, lead Viviane).
+    const cleanText = text.replace(/\|\|\|/g, '\n');
+
     try {
       // lead.phone já vem completo (com DDI correto) — não prefixar 55.
       const phone = lead.phone;
       await firstValueFrom(
         this.http.post(
           `${this.uazapiBaseUrl}/send/text`,
-          { number: phone, text },
+          { number: phone, text: cleanText },
           { headers: { token: this.uazapiToken } },
         ),
       );
@@ -1135,14 +1143,14 @@ ${cadenceTomBlock(!!guide)}`;
       const ctx = Array.isArray(lead.aiContext) ? lead.aiContext : [];
       await this.leadsRepo.update(lead.id, {
         followupSentAt: new Date(),
-        aiContext: [...ctx, { role: 'assistant', content: text, timestamp: new Date().toISOString() }],
+        aiContext: [...ctx, { role: 'assistant', content: cleanText, timestamp: new Date().toISOString() }],
         waLastMessageAt: new Date(),
       });
 
       const fresh = await this.leadsRepo.findOne({ where: { id: lead.id } });
       if (fresh) this.realtime.emitLeadUpdated(fresh);
 
-      this.logger.log(`[Followup] Enviado para ${lead.phone}: "${text.slice(0, 60)}..."`);
+      this.logger.log(`[Followup] Enviado para ${lead.phone}: "${cleanText.slice(0, 60)}..."`);
       return true;
     } catch (err: any) {
       this.logger.error(`[Followup] Erro ao enviar para ${lead.phone}: ${err.message}`);
