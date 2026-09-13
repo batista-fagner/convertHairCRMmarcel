@@ -664,6 +664,25 @@ export class SdrController {
       }
     }
 
+    // Rede de segurança contra confirmação falsa: a IA pode escrever o texto
+    // "ficou agendada" (o template exato do PASSO B do prompt) no "reply" sem
+    // ter marcado action="schedule"/appointmentDateTime corretamente no mesmo
+    // JSON — nesse caso o bloco acima nem roda, bookedNow fica false e NENHUM
+    // agendamento é criado, mas o lead recebe a confirmação como se tivesse
+    // dado certo. Achado 2026-09-13: 5 leads reais confirmados sem appointment
+    // real (Larissa, Karolayne, Solangy, Marcelo Portela Suporte e outro) —
+    // provável inconsistência do Gemini entre o texto livre e os campos
+    // estruturados do mesmo JSON (ver também o bug do ano em
+    // parseNyNaiveDateTime, achado no mesmo lote). Bloqueia a mensagem mentirosa
+    // e avisa o operador imediatamente — aqui não dá pra confiar só no prompt.
+    if (!bookedNow && /ficou agendada/i.test(ai.reply ?? '')) {
+      this.logger.error(
+        `[SDR][AGENDA] IA confirmou agendamento pra ${phone} sem criar appointment real (action=${ai.action}, appointmentDateTime=${ai.appointmentDateTime}) — bloqueando confirmação falsa`,
+      );
+      ai.reply = 'Só um instante que preciso confirmar direitinho esse horário antes de fechar — me confirma de novo o dia e o horário que você quer, por favor?';
+      await this.notifyOperatorBookingMismatch(lead, ai.appointmentDateTime ?? null);
+    }
+
     // Escalada explícita pra humano (preço fora do documentado, reclamação,
     // ameaça jurídica, pedido de falar com o Marcel/atendente, etc.) —
     // independe da pergunta única já ter sido respondida ou não.
@@ -785,6 +804,30 @@ export class SdrController {
             { headers: { token: this.uazapiToken } },
           ),
         ).catch((err: any) => this.logger.error(`[SDR] Erro ao notificar loop ${phone}: ${err.message}`)),
+      ),
+    );
+  }
+
+  /** Alerta imediato pro operador quando a rede de segurança de agendamento barra uma confirmação falsa (ver comentário no chamador). */
+  private async notifyOperatorBookingMismatch(lead: Lead, attemptedDateTime: string | null) {
+    const stored = await this.settings.get(SDR_NOTIFY_PHONES_KEY);
+    const phones: string[] = stored
+      ? stored.split(',').map((p) => p.trim()).filter(Boolean)
+      : this.operatorPhone ? [this.operatorPhone] : [];
+
+    if (phones.length === 0) return;
+
+    const msg = `🚨 IA tentou confirmar agendamento que NÃO foi criado de verdade!\n\nNome: ${lead.name}\nWhatsApp: ${lead.phone}\nHorário que a IA tentou usar: ${attemptedDateTime ?? '(não informado)'}\n\nA mensagem falsa foi bloqueada e a Clara pediu o horário de novo pro lead — mas confirme manualmente com ela pra não perder o agendamento.`;
+
+    await Promise.allSettled(
+      phones.map((phone) =>
+        firstValueFrom(
+          this.http.post(
+            `${this.uazapiBaseUrl}/send/text`,
+            { number: phone, text: msg },
+            { headers: { token: this.uazapiToken } },
+          ),
+        ).catch((err: any) => this.logger.error(`[SDR] Erro ao notificar mismatch de agendamento ${phone}: ${err.message}`)),
       ),
     );
   }

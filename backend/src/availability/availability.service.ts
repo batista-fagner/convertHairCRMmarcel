@@ -211,17 +211,31 @@ export class AvailabilityService {
   }
 
   /**
-   * Bloco de texto pro prompt da Clara: próximos `daysAhead` dias (a partir de
-   * hoje, horário de Nova York) que tiverem pelo menos 1 horário livre, em
-   * formato AM/PM (pedido do cliente). Recalculado a cada turno — a Clara
-   * NUNCA inventa horário, só oferece o que está nesta tabela.
+   * Bloco de texto pro prompt da Clara: acha o dia MAIS PRÓXIMO (a partir de
+   * hoje, horário de Nova York) que tiver pelo menos 1 horário livre, em
+   * formato AM/PM (pedido do cliente), e destaca só ele — em vez de despejar
+   * todos os dias com vaga dos próximos 14 dias na Clara de uma vez, o que
+   * fazia ela oferecer opção demais ("temos vaga quinta, sexta, segunda...").
+   * Guarda mais 2 dias seguintes como reserva silenciosa, só pro caso da
+   * pessoa dizer que o dia mais próximo não serve. Recalculado a cada turno —
+   * a Clara NUNCA inventa horário, só oferece o que está nesta tabela.
    */
   async buildAvailabilityBlock(daysAhead = 14): Promise<{ text: string; hasSlots: boolean }> {
     const { year, month, day } = nowZonedParts(TIMEZONE);
     const base = zonedWallTimeToUtc(year, month, day, 12, 0, TIMEZONE); // meio-dia NY, só de referência pra somar dias
-    const lines: string[] = [];
+    // "spokenLabel" é só pro exemplo de tom de voz (nunca tem data, fica natural
+    // tipo "temos vaga hoje às 2h"). "dateLabel" é o dado de verdade que a IA
+    // deve copiar pro appointmentDateTime — SEMPRE com dia/mês/ANO explícitos,
+    // inclusive em "hoje"/"amanhã". Antes essas duas linhas não traziam data
+    // nenhuma, e o ano nunca era informado em nenhuma linha: o prompt manda a
+    // IA "pegar a data exata da tabela" em vez de calcular, mas sem isso ela
+    // tinha que adivinhar o dia real de "hoje" e o ano corrente sozinha — cada
+    // LLM adivinha diferente (GPT e Gemini divergiram nisso, causando
+    // appointmentDateTime errado, "horário já preenchido" falso pro lead e
+    // agendamento nunca criado de verdade). Achado 2026-09-13.
+    const found: { spokenLabel: string; dateLabel: string; slots: string[] }[] = [];
 
-    for (let i = 0; i < daysAhead; i++) {
+    for (let i = 0; i < daysAhead && found.length < 3; i++) {
       const d = new Date(base.getTime() + i * 24 * 60 * 60 * 1000);
       const parts = new Intl.DateTimeFormat('en-CA', {
         timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -233,12 +247,24 @@ export class AvailabilityService {
       if (!slots.length) continue;
 
       const weekday = WEEKDAY_LABELS[new Date(Date.UTC(y, m - 1, da)).getUTCDay()];
-      lines.push(`${weekday}, ${pad(da)}/${pad(m)} = ${slots.map(formatAmPm).join(', ')}`);
+      const dateSuffix = `${pad(da)}/${pad(m)}/${y}`;
+      const spokenLabel = i === 0 ? 'hoje' : i === 1 ? 'amanhã' : `${weekday}, ${pad(da)}/${pad(m)}`;
+      const dateLabel = i === 0 ? `hoje (${dateSuffix})` : i === 1 ? `amanhã (${dateSuffix})` : `${weekday}, ${dateSuffix}`;
+      found.push({ spokenLabel, dateLabel, slots });
     }
 
-    if (!lines.length) {
+    if (!found.length) {
       return { text: 'Nenhum horário disponível nos próximos dias.', hasSlots: false };
     }
-    return { text: `${lines.join('\n')}\n(horário de Nova York)`, hasSlots: true };
+
+    const [nearest, ...rest] = found;
+    let text = `Vaga mais próxima — ${nearest.dateLabel} = ${nearest.slots.map(formatAmPm).join(', ')}\n(ofereça SÓ essa primeiro, com linguagem natural, tipo "temos vaga ${nearest.spokenLabel} às Xh, te atende?" — NUNCA fale a data por extenso nessa frase, ela é só pra você localizar o dia certo ao montar o appointmentDateTime)`;
+    if (rest.length) {
+      text += `\n\nSó use as opções abaixo se a pessoa disser que esse dia não serve:\n${rest
+        .map((r) => `${r.dateLabel} = ${r.slots.map(formatAmPm).join(', ')}`)
+        .join('\n')}`;
+    }
+    text += '\n(horário de Nova York)';
+    return { text, hasSlots: true };
   }
 }
