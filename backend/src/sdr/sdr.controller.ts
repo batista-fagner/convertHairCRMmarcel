@@ -750,7 +750,12 @@ export class SdrController {
 
     // Handoff: avisa o closer e destaca o card
     if (handoff) {
-      await this.notifyOperator(lead, bookedAtDateTime ?? undefined);
+      // handoff pode acontecer SEM agendamento real (explicitEscalation ou
+      // agenda sem vaga que sirva pro lead) — nesse caso bookedAtDateTime fica
+      // null e o operador precisa saber que é uma escalada manual, não uma
+      // sessão já marcada (achado 2026-09-18: lead Sergio escalado por não
+      // haver horário disponível no fim da tarde, mensagem genérica confundiu).
+      await this.notifyOperator(lead, bookedAtDateTime ?? undefined, !bookedAtDateTime);
       this.realtime.emitLeadHandoff(lead);
     } else {
       this.realtime.emitLeadUpdated(lead);
@@ -832,7 +837,7 @@ export class SdrController {
     );
   }
 
-  private async notifyOperator(lead: Lead, bookedAt?: Date) {
+  private async notifyOperator(lead: Lead, bookedAt?: Date, noRealBooking?: boolean) {
     // Resolve phones: banco tem prioridade, env var é fallback para o primeiro
     const stored = await this.settings.get(SDR_NOTIFY_PHONES_KEY);
     const phones: string[] = stored
@@ -846,7 +851,12 @@ export class SdrController {
       : `\nDona do próprio schedule: ${lead.donaDeSchedule ? 'sim' : 'não (helper)'}`;
     const bookedLine = bookedAt
       ? `\n\n📅 Já ficou AGENDADA a Sessão de Mentoria: ${bookedAt.toLocaleString('pt-BR', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short', hour12: true })} (horário de Nova York)`
-      : '';
+      // Handoff sem horário real (escalada manual ou nenhuma vaga da agenda
+      // serviu pro lead) — deixa isso explícito, senão o operador acha que
+      // "sumiu" a data/hora de um agendamento que nunca existiu.
+      : noRealBooking
+        ? `\n\n⚠️ Nenhum horário foi agendado automaticamente — o lead pediu algo fora da agenda disponível (ou pediu pra falar com alguém). Veja a conversa e combine manualmente.`
+        : '';
     const msg = `🔥 Lead da Clara (Pro Cleaning)!\n\nNome: ${lead.name}\nWhatsApp: ${lead.phone}${donaDeScheduleLine}${bookedLine}\n\nAssuma a conversa.`;
 
     await Promise.allSettled(
