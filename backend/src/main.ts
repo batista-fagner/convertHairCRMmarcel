@@ -7,10 +7,10 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableCors();
   // Anexos do chat do lead viram base64 no body JSON (~33% maior que o
-  // arquivo original) — 16MB de mídia gera corpo de ~22MB, bem acima do
+  // arquivo original) — 50MB de mídia gera corpo de ~68MB, bem acima do
   // limite default do Express (100kb).
-  app.use(json({ limit: '25mb' }));
-  app.use(urlencoded({ limit: '25mb', extended: true }));
+  app.use(json({ limit: '70mb' }));
+  app.use(urlencoded({ limit: '70mb', extended: true }));
 
   const port = process.env.PORT || 3001;
   await app.listen(port);

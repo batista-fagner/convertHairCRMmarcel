@@ -7,7 +7,7 @@ import { formatPhone, timeAgo, TEMP_BADGE } from '../lib/leadFormat'
 import Avatar from './Avatar'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
-const MAX_MEDIA_BYTES = 16 * 1024 * 1024 // 16 MB — teto de mídia do WhatsApp/uazapi
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024 // 50 MB
 
 function mediaIcon(type) {
   if (type === 'image') return null // rendered as <img>
@@ -159,7 +159,7 @@ export default function LeadConversationPanel({
     e.target.value = ''
 
     if (file.size > MAX_MEDIA_BYTES) {
-      setSendError('Arquivo muito grande (máx. 16 MB)')
+      setSendError('Arquivo muito grande (máx. 50 MB)')
       return
     }
 

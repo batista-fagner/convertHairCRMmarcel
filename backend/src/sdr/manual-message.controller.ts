@@ -149,8 +149,29 @@ export class ManualMessageController {
         );
       }
     } catch (err: any) {
-      this.logger.error(`[Manual] Falha ao enviar ${body.type} para ${phone}: ${err.message}`);
-      throw new HttpException(`Falha ao enviar mensagem: ${err.message}`, HttpStatus.BAD_GATEWAY);
+      const status = err.response?.status;
+      const uazapiDetail = err.response?.data?.message || err.response?.data?.error || err.message;
+      this.logger.error(`[Manual] Falha ao enviar ${body.type} para ${phone}: [${status ?? 'sem status'}] ${uazapiDetail}`);
+      throw new HttpException(this.friendlyUazapiError(status, uazapiDetail), HttpStatus.BAD_GATEWAY);
     }
+  }
+
+  // Traduz a falha técnica da uazapi (status HTTP + corpo do erro) numa
+  // mensagem que o operador do CRM entende, sem expor jargão de API.
+  private friendlyUazapiError(status: number | undefined, detail: string): string {
+    const text = (detail || '').toLowerCase();
+    if (status === 413 || /too large|payload|file size|large file/.test(text)) {
+      return 'O WhatsApp recusou o arquivo por ser muito grande. Tente um arquivo menor.';
+    }
+    if (status === 401 || status === 403) {
+      return 'A conexão do WhatsApp expirou ou está sem permissão. Reconecte a instância em Configurações.';
+    }
+    if (status === 404 || status === 405) {
+      return 'Não foi possível enviar pelo WhatsApp agora (instância indisponível). Tente novamente em instantes.';
+    }
+    if (!status) {
+      return 'Não foi possível conectar ao WhatsApp. Verifique sua internet e tente novamente.';
+    }
+    return 'Não foi possível enviar a mensagem pelo WhatsApp. Tente novamente em instantes.';
   }
 }
