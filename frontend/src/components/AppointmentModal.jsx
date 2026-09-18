@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { X, Trash2, Calendar, User, Phone, Tag, DollarSign, FileText } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, Trash2, Calendar, User, Phone, Tag, DollarSign, FileText, Search, Link2, Link2Off } from 'lucide-react'
 import { appointmentsApi } from '../lib/appointmentsApi'
 import { toNyDateTimeLocalValue, parseNyDateTimeLocalValue } from '../lib/nyTime'
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
 const STATUS_OPTIONS = [
   { value: 'agendado',       label: 'Agendado' },
@@ -15,6 +17,7 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
   const isEdit = !!appointment
 
   const [form, setForm] = useState({
+    leadId:        appointment?.leadId ?? null,
     clientName:    appointment?.clientName ?? '',
     clientPhone:   appointment?.clientPhone ?? '',
     service:       appointment?.service ?? '',
@@ -26,8 +29,51 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  // Busca de lead do Kanban pra vincular o agendamento (leadId) e
+  // autopreencher nome/telefone, evitando digitar/errar na mão.
+  const [leadSearch, setLeadSearch] = useState('')
+  const [leadResults, setLeadResults] = useState([])
+  const [leadSearchOpen, setLeadSearchOpen] = useState(false)
+  const [leadSearchLoading, setLeadSearchLoading] = useState(false)
+  const leadBoxRef = useRef(null)
+
+  useEffect(() => {
+    if (!leadSearch.trim()) {
+      setLeadResults([])
+      return
+    }
+    setLeadSearchLoading(true)
+    const id = setTimeout(() => {
+      fetch(`${API}/leads?limit=8&search=${encodeURIComponent(leadSearch.trim())}`)
+        .then(r => r.json())
+        .then(d => setLeadResults(d?.data || []))
+        .catch(() => setLeadResults([]))
+        .finally(() => setLeadSearchLoading(false))
+    }, 350)
+    return () => clearTimeout(id)
+  }, [leadSearch])
+
+  useEffect(() => {
+    function onClickOutside(e) {
+      if (leadBoxRef.current && !leadBoxRef.current.contains(e.target)) setLeadSearchOpen(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [])
+
   function update(field, value) {
     setForm(f => ({ ...f, [field]: value }))
+  }
+
+  function selectLead(lead) {
+    setForm(f => ({ ...f, leadId: lead.id, clientName: lead.name || f.clientName, clientPhone: lead.phone || f.clientPhone }))
+    setLeadSearch('')
+    setLeadResults([])
+    setLeadSearchOpen(false)
+  }
+
+  function unlinkLead() {
+    setForm(f => ({ ...f, leadId: null }))
   }
 
   async function handleSave() {
@@ -35,6 +81,7 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
     setSaving(true)
     try {
       const payload = {
+        leadId: form.leadId || null,
         clientName: form.clientName.trim(),
         clientPhone: form.clientPhone.trim() || null,
         service: form.service.trim(),
@@ -78,6 +125,48 @@ export default function AppointmentModal({ appointment, defaultDate, onClose, on
         </div>
 
         <div className="p-6 space-y-4">
+          <Field icon={form.leadId ? <Link2 className="w-3.5 h-3.5 text-violet-500" /> : <Search className="w-3.5 h-3.5" />} label="Vincular lead do Kanban (opcional)">
+            <div ref={leadBoxRef} className="relative">
+              <input
+                type="text"
+                value={leadSearch}
+                onChange={e => { setLeadSearch(e.target.value); setLeadSearchOpen(true) }}
+                onFocus={() => setLeadSearchOpen(true)}
+                placeholder="Buscar por nome ou telefone..."
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+              {leadSearchOpen && leadSearch.trim() && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+                  {leadSearchLoading ? (
+                    <div className="px-3 py-2 text-xs text-gray-400">Buscando...</div>
+                  ) : leadResults.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-gray-400">Nenhum lead encontrado</div>
+                  ) : (
+                    leadResults.map(l => (
+                      <button
+                        key={l.id}
+                        type="button"
+                        onClick={() => selectLead(l)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 flex flex-col"
+                      >
+                        <span className="font-medium text-gray-800">{l.name || 'Sem nome'}</span>
+                        <span className="text-xs text-gray-400">{l.phone}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            {form.leadId && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-violet-600">
+                <Link2 className="w-3 h-3" /> Vinculado a um lead do Kanban
+                <button type="button" onClick={unlinkLead} className="ml-1 text-gray-400 hover:text-red-500 flex items-center gap-0.5">
+                  <Link2Off className="w-3 h-3" /> desvincular
+                </button>
+              </div>
+            )}
+          </Field>
+
           <Field icon={<User className="w-3.5 h-3.5" />} label="Nome do contato">
             <input
               type="text"
