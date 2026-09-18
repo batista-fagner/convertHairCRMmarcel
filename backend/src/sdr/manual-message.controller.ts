@@ -127,25 +127,25 @@ export class ManualMessageController {
         await firstValueFrom(
           this.http.post(`${base}/send/text`, { number: phone, text: body.text }, { headers }),
         );
-      } else if (body.type === 'image') {
-        await firstValueFrom(
-          this.http.post(`${base}/send/image`, { number: phone, base64: body.base64, caption: body.caption || '' }, { headers }),
-        );
-      } else if (body.type === 'video') {
-        await firstValueFrom(
-          this.http.post(`${base}/send/video`, { number: phone, base64: body.base64, caption: body.caption || '' }, { headers }),
-        );
-      } else if (body.type === 'document') {
+      } else {
+        // uazapi não tem /send/image, /send/video, /send/document, /send/audio
+        // separados (isso dava 405) — todo mídia vai por /send/media com
+        // `type`, igual ao resto do backend (ver sdr-followup.service.ts,
+        // efraim.controller.ts).
         await firstValueFrom(
           this.http.post(
-            `${base}/send/document`,
-            { number: phone, base64: body.base64, filename: body.filename || 'arquivo', mimetype: body.mimeType || 'application/octet-stream', caption: body.caption || '' },
+            `${base}/send/media`,
+            {
+              number: phone,
+              type: body.type,
+              file: body.base64,
+              mimetype: body.mimeType,
+              text: body.caption || '',
+              docName: body.type === 'document' ? (body.filename || 'arquivo') : undefined,
+              delay: 1000,
+            },
             { headers },
           ),
-        );
-      } else if (body.type === 'audio') {
-        await firstValueFrom(
-          this.http.post(`${base}/send/audio`, { number: phone, base64: body.base64 }, { headers }),
         );
       }
     } catch (err: any) {
