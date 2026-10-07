@@ -512,6 +512,60 @@ export class LeadsService {
     return Array.from({ length: 24 }, (_, hour) => ({ hour, count: byHour.get(hour) || 0 }));
   }
 
+  /**
+   * Leads com conversa (ai_context não vazio) cuja última mensagem caiu dentro
+   * do período pedido — base pro export de conversas (Settings → Exportar
+   * Conversas) que o Marcel usa pra alimentar treinamento da própria IA.
+   * Mesmo ajuste de timezone do appendDateFilter (from/to vêm como data em
+   * America/Sao_Paulo, created_at/wa_last_message_at são timestamp naive UTC).
+   */
+  async findConversationsForExport(from?: string, to?: string): Promise<
+    {
+      id: string;
+      name: string;
+      phone: string;
+      instagram: string | null;
+      kanbanStage: string;
+      classification: string;
+      temperature: string | null;
+      isMql: boolean;
+      createdAt: Date;
+      qualifiedAt: Date | null;
+      waLastMessageAt: Date | null;
+      messages: { role: string; content: string; timestamp?: string }[];
+    }[]
+  > {
+    const params: string[] = [];
+    let filter = "ai_context IS NOT NULL AND jsonb_array_length(ai_context) > 0";
+    if (from) {
+      params.push(from);
+      filter += ` AND wa_last_message_at >= ($${params.length}::timestamp AT TIME ZONE 'America/Sao_Paulo' AT TIME ZONE 'UTC')`;
+    }
+    if (to) {
+      params.push(to);
+      filter += ` AND wa_last_message_at < ($${params.length}::timestamp AT TIME ZONE 'America/Sao_Paulo' AT TIME ZONE 'UTC')`;
+    }
+    const rows = await this.leadsRepo.query(
+      `SELECT id, name, phone, instagram, kanban_stage, classification, temperature, is_mql, created_at, qualified_at, wa_last_message_at, ai_context
+       FROM leads WHERE ${filter} ORDER BY wa_last_message_at ASC`,
+      params,
+    );
+    return rows.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      instagram: row.instagram,
+      kanbanStage: row.kanban_stage,
+      classification: row.classification,
+      temperature: row.temperature,
+      isMql: row.is_mql,
+      createdAt: row.created_at,
+      qualifiedAt: row.qualified_at,
+      waLastMessageAt: row.wa_last_message_at,
+      messages: Array.isArray(row.ai_context) ? row.ai_context : [],
+    }));
+  }
+
   async clearAll(): Promise<{ deleted: number }> {
     const result = await this.leadsRepo.createQueryBuilder().delete().from(Lead).execute();
     this.logger.warn(`Todos os ${result.affected} leads foram deletados`);

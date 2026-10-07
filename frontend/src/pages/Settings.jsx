@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Mic, Calendar, ChevronLeft, ChevronRight, X, Info, AlertTriangle } from 'lucide-react'
+import { Settings as SettingsIcon, Key, Webhook, MessageCircle, Share2, Bot, Save, RotateCcw, Loader2, CheckCircle2, Send, Trash2, Clock, Sparkles, ToggleLeft, ToggleRight, Wifi, WifiOff, Timer, RefreshCw, XCircle, Activity, Plus, Pencil, Tag, Layers, Video, Mic, Calendar, ChevronLeft, ChevronRight, X, Info, AlertTriangle, Download, FileJson, FileText } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3002/api'
 
@@ -1831,6 +1831,114 @@ function FollowupStatus() {
   )
 }
 
+function toDateInputValue(d) {
+  return d.toISOString().slice(0, 10)
+}
+
+// Export de conversas dos leads pra um período — o Marcel baixa isso pra
+// alimentar o treinamento da própria IA (ver onde a Sofia errou, o que
+// melhorar etc.). "to" vai pro backend como dia seguinte (exclusivo), mesma
+// convenção usada no resto do CRM (Analytics).
+function ConversationExport() {
+  const todayStr = toDateInputValue(new Date())
+  const defaultFrom = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 30)
+    return toDateInputValue(d)
+  })()
+
+  const [from, setFrom] = useState(defaultFrom)
+  const [to, setTo] = useState(todayStr)
+  const [format, setFormat] = useState('json')
+  const [exporting, setExporting] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleExport = () => {
+    setError('')
+    if (!from || !to) {
+      setError('Selecione o período (de/até)')
+      return
+    }
+    if (from > to) {
+      setError('"De" não pode ser depois de "Até"')
+      return
+    }
+
+    setExporting(true)
+    const toExclusive = new Date(`${to}T00:00:00`)
+    toExclusive.setDate(toExclusive.getDate() + 1)
+
+    const params = new URLSearchParams({
+      from,
+      to: toDateInputValue(toExclusive),
+      format,
+    })
+    window.open(`${API}/leads/export-conversations?${params.toString()}`, '_blank')
+    setTimeout(() => setExporting(false), 1000)
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 mb-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Download className="w-5 h-5 text-sky-500" />
+        <div>
+          <p className="font-semibold text-slate-800 text-sm">Exportar Conversas</p>
+          <p className="text-xs text-slate-400 mt-0.5">Baixe o histórico de conversas dos leads num período — útil pra analisar e treinar a IA</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-1 block">De</label>
+          <input
+            type="date"
+            value={from}
+            max={todayStr}
+            onChange={e => setFrom(e.target.value)}
+            className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-slate-500 mb-1 block">Até</label>
+          <input
+            type="date"
+            value={to}
+            max={todayStr}
+            onChange={e => setTo(e.target.value)}
+            className="w-full text-sm border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-sky-300"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        <button
+          onClick={() => setFormat('json')}
+          className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition ${format === 'json' ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+        >
+          <FileJson className="w-3.5 h-3.5" /> JSON (p/ treinar IA)
+        </button>
+        <button
+          onClick={() => setFormat('txt')}
+          className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition ${format === 'txt' ? 'bg-sky-50 border-sky-300 text-sky-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+        >
+          <FileText className="w-3.5 h-3.5" /> Texto (leitura)
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-rose-500 mb-3">{error}</p>}
+
+      <button
+        onClick={handleExport}
+        disabled={exporting}
+        className="flex items-center gap-2 text-sm font-medium bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 text-white px-4 py-2 rounded-xl transition"
+      >
+        {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+        {exporting ? 'Gerando...' : 'Exportar conversas'}
+      </button>
+    </div>
+  )
+}
+
 function useMetaAdsStatus(refreshKey) {
   const [status, setStatus] = useState({ loading: true, configured: false })
 
@@ -2775,6 +2883,8 @@ export default function Settings() {
       <CadenceConfig />
 
       <FollowupStatus />
+
+      <ConversationExport />
 
       <div>
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Integrações</p>

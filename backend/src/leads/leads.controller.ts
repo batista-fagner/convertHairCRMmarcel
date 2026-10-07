@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Query, Delete, Patch, Post, Body, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Controller, Get, Param, Query, Delete, Patch, Post, Body, Res, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import type { Response } from 'express';
 import { LeadsService } from './leads.service';
 import { FacebookService } from '../facebook/facebook.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -206,6 +207,56 @@ export class LeadsController {
   @Get('tags/all')
   async allTags() {
     return this.leadsService.getAllTags();
+  }
+
+  // Export de conversas pra um período (Settings → Exportar Conversas) — o
+  // Marcel baixa isso pra alimentar o treinamento da própria IA (ver o que
+  // errou, o que melhorar). from/to seguem a mesma convenção do resto do CRM:
+  // data em America/Sao_Paulo, "to" exclusivo (dia seguinte ao último dia).
+  @Get('export-conversations')
+  async exportConversations(
+    @Res() res: Response,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('format') format?: 'json' | 'txt',
+  ) {
+    const leads = await this.leadsService.findConversationsForExport(from, to);
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (format === 'txt') {
+      const body = this.buildConversationsTxt(leads);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="conversas-${stamp}.txt"`);
+      res.send(body);
+      return;
+    }
+
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="conversas-${stamp}.json"`);
+    res.send(JSON.stringify({ exportedAt: new Date().toISOString(), from: from || null, to: to || null, total: leads.length, leads }, null, 2));
+  }
+
+  private buildConversationsTxt(leads: Awaited<ReturnType<LeadsService['findConversationsForExport']>>): string {
+    const fmtDate = (d?: Date | string | null) => (d ? new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—');
+    const blocks = leads.map((lead) => {
+      const header = [
+        `Lead: ${lead.name} (${lead.phone})`,
+        `Instagram: ${lead.instagram || '—'}`,
+        `Estágio: ${lead.kanbanStage} | Classificação: ${lead.classification} | MQL: ${lead.isMql ? 'sim' : 'não'}`,
+        `Criado em: ${fmtDate(lead.createdAt)} | Última mensagem: ${fmtDate(lead.waLastMessageAt)}`,
+        '-'.repeat(60),
+      ].join('\n');
+
+      const lines = lead.messages.map((m) => {
+        const who = m.role === 'assistant' ? 'Sofia (IA)' : 'Lead';
+        const when = m.timestamp ? fmtDate(m.timestamp) : '';
+        return `[${when}] ${who}: ${m.content}`;
+      });
+
+      return `${header}\n${lines.join('\n')}`;
+    });
+
+    return blocks.join('\n\n' + '='.repeat(60) + '\n\n');
   }
 
   @Get(':id')
