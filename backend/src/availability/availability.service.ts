@@ -26,6 +26,9 @@ const WEEKDAY_LABELS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feir
 // de verdade, nunca por um "+N horas" fixo.
 const TIMEZONE = 'America/New_York';
 
+// Antecedência mínima (em horas) entre agora e o início de um slot oferecido/aceito.
+const MIN_ADVANCE_HOURS = 24;
+
 function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
@@ -136,7 +139,7 @@ export class AvailabilityService {
     if (result.affected === 0) throw new NotFoundException('Regra de disponibilidade não encontrada');
   }
 
-  /** Slots livres ("HH:MM", 24h) pra uma data (Y-M-D, horário de Nova York) — já descontando agendamentos existentes e horários passados (se for hoje). */
+  /** Slots livres ("HH:MM", 24h) pra uma data (Y-M-D, horário de Nova York) — já descontando agendamentos existentes e horários com menos de 24h de antecedência. */
   async getSlotsForDate(year: number, month: number, day: number): Promise<string[]> {
     const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
     const dateStr = `${year}-${pad(month)}-${pad(day)}`;
@@ -170,19 +173,15 @@ export class AvailabilityService {
     const existing = await this.appointmentsRepo.find({ where: { startDateTime: Between(dayStart, dayEnd) } });
     const booked = new Set(existing.filter((a) => a.status !== 'cancelado').map((a) => zonedTimeOf(a.startDateTime, TIMEZONE)));
 
-    // Se o dia é hoje (NY), remove horários que já passaram (com 30min de folga
-    // pra não oferecer um slot "daqui a 2min" impossível de confirmar a tempo).
-    const now = nowZonedParts(TIMEZONE);
-    const isToday = now.year === year && now.month === month && now.day === day;
-    const nowMinutes = now.hour * 60 + now.minute + 30;
+    // Antecedência mínima de 24h: cliente pediu (2026-10-14) depois de um lead
+    // marcar sessão muito em cima da hora. Compara o instante real (UTC) de cada
+    // slot com agora + 24h, então vale pra hoje, amanhã e virada de DST igual.
+    const minStart = Date.now() + MIN_ADVANCE_HOURS * 60 * 60 * 1000;
 
     return slots.filter((s) => {
       if (booked.has(s)) return false;
-      if (isToday) {
-        const [h, m] = s.split(':').map(Number);
-        if (h * 60 + m <= nowMinutes) return false;
-      }
-      return true;
+      const [h, m] = s.split(':').map(Number);
+      return zonedWallTimeToUtc(year, month, day, h, m, TIMEZONE).getTime() >= minStart;
     });
   }
 
@@ -198,6 +197,40 @@ export class AvailabilityService {
     if (!match) return null;
     const [, y, m, d, h, mi] = match.map(Number) as unknown as number[];
     return zonedWallTimeToUtc(y, m, d, h, mi, TIMEZONE);
+  }
+
+  /** true se o horário começa antes da antecedência mínima (agora + MIN_ADVANCE_HOURS). */
+  isWithinMinAdvance(dateTime: Date): boolean {
+    return dateTime.getTime() < Date.now() + MIN_ADVANCE_HOURS * 60 * 60 * 1000;
+  }
+
+  /**
+   * Próximos horários livres já formatados pra mensagem ("quarta, 15/10 às 9:00 PM"),
+   * pegando até 2 por dia pra não oferecer só horários do mesmo dia. Usado quando
+   * o backend recusa um horário (em cima da hora ou ocupado) — o objetivo é
+   * sempre fechar o agendamento, então a recusa já vem com alternativas reais.
+   */
+  async getNextSlotOptions(max = 3, daysAhead = 14): Promise<string[]> {
+    const { year, month, day } = nowZonedParts(TIMEZONE);
+    const base = zonedWallTimeToUtc(year, month, day, 12, 0, TIMEZONE);
+    const options: string[] = [];
+
+    for (let i = 0; i < daysAhead && options.length < max; i++) {
+      const d = new Date(base.getTime() + i * 24 * 60 * 60 * 1000);
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(d);
+      const get = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
+      const y = get('year'), m = get('month'), da = get('day');
+
+      const slots = await this.getSlotsForDate(y, m, da);
+      const weekday = WEEKDAY_LABELS[new Date(Date.UTC(y, m - 1, da)).getUTCDay()];
+      for (const s of slots.slice(0, 2)) {
+        if (options.length >= max) break;
+        options.push(`${weekday}, ${pad(da)}/${pad(m)} às ${formatAmPm(s)}`);
+      }
+    }
+    return options;
   }
 
   async isSlotAvailable(dateTime: Date): Promise<boolean> {
@@ -265,6 +298,9 @@ export class AvailabilityService {
         .join('\n')}`;
     }
     text += '\n(horário de Nova York)';
+    // Vai no bloco (e não só no prompt) porque o prompt pode estar personalizado
+    // em Settings — assim a regra das 24h chega na Clara de qualquer jeito.
+    text += `\n\nREGRA DE ANTECEDÊNCIA: as sessões só podem ser agendadas com pelo menos ${MIN_ADVANCE_HOURS}h de antecedência (por isso não há horários de hoje nem das próximas ${MIN_ADVANCE_HOURS}h na tabela). Se a pessoa pedir um horário em cima da hora (ex.: "hoje", "daqui a pouco"), explique com leveza que a agenda é feita com ${MIN_ADVANCE_HOURS}h de antecedência pra garantir que o Marcel esteja 100% preparado pra ela, e JÁ ofereça os horários reais mais próximos da tabela — o objetivo é sempre fechar o agendamento.`;
     return { text, hasSlots: true };
   }
 }

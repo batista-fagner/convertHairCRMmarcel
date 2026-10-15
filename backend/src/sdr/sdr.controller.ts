@@ -655,12 +655,24 @@ export class SdrController {
           this.logger.error(`[SDR][AGENDA] Falha ao criar agendamento pra ${phone}: ${err.message}`);
         }
       } else {
-        // Corrida: horário que a IA ofereceu já não está mais livre (raro, mas
-        // possível se dois leads confirmarem quase ao mesmo tempo). Não confirma,
-        // não faz handoff — o lead continua a conversa e escolhe outro horário
-        // no próximo turno, já vendo a tabela atualizada.
-        this.logger.warn(`[SDR][AGENDA] Horário ${ai.appointmentDateTime} não está mais disponível para ${phone} — não agendado`);
-        ai.reply = 'Poxa, esse horário acabou de ser preenchido por outra pessoa! Me diz outro horário que funcione pra você que eu já vejo se ainda tá livre.';
+        // Horário recusado — 2 motivos possíveis, com mensagens diferentes:
+        // (a) em cima da hora: menos de 24h de antecedência (regra pedida pelo
+        //     cliente em 2026-10-14);
+        // (b) corrida: outro lead pegou o horário quase ao mesmo tempo.
+        // Nos dois casos não confirma nem faz handoff, e a mensagem já oferece os
+        // próximos horários reais — o objetivo é fechar o agendamento, não só
+        // recusar. O lead escolhe um deles no próximo turno.
+        const tooSoon = !!parsedDateTime && this.availabilityService.isWithinMinAdvance(parsedDateTime);
+        this.logger.warn(
+          `[SDR][AGENDA] Horário ${ai.appointmentDateTime} recusado para ${phone} (${tooSoon ? 'menos de 24h de antecedência' : 'não está mais disponível'}) — não agendado`,
+        );
+        const options = await this.availabilityService.getNextSlotOptions(3);
+        const intro = tooSoon
+          ? 'Pra garantir que o Marcel esteja 100% preparado pra sua sessão, a gente agenda sempre com pelo menos 24h de antecedência 😊'
+          : 'Poxa, esse horário acabou de ser preenchido por outra pessoa!';
+        ai.reply = options.length
+          ? `${intro}|||Tenho esses horários disponíveis:\n${options.map((o) => `• ${o}`).join('\n')}\n(horário de Nova York)\nQual fica melhor pra você?`
+          : `${intro}|||Me diz outro dia e horário que funcione pra você que eu já vejo se tá livre.`;
       }
     }
 
