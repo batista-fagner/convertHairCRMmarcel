@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { Lead, KanbanStage, LeadTemperature } from '../common/entities/lead.entity';
 import { SettingsService } from '../settings/settings.service';
-import { SDR_JSON_FORMAT } from './sdr.prompt';
+import { SDR_JSON_FORMAT, buildEscalationSection } from './sdr.prompt';
 
 export type SdrStage = 'abertura' | 'qualificacao' | 'quente' | 'frio' | 'perdido' | 'encerrado';
 
@@ -15,6 +15,8 @@ export interface SdrResponse {
   action?: 'schedule' | 'none';
   appointmentDateTime?: string | null;
   shouldIgnore?: boolean;
+  needsOperator?: boolean;
+  operatorReason?: string | null;
   success: boolean;
 }
 
@@ -39,11 +41,11 @@ function buildLeadContext(lead?: Lead | null): string {
 // Compõe o prompt final: persona (editável) + contexto do lead + tabela de
 // disponibilidade (calculada a cada turno, vem por último igual buildDateBlock
 // no fisio-secretary — mantém o prefixo estático, habilita cache) + formato JSON.
-function buildSystemPrompt(basePrompt: string, lead: Lead | null | undefined, availabilityBlock?: string): string {
+function buildSystemPrompt(basePrompt: string, escalationRules: string, lead: Lead | null | undefined, availabilityBlock?: string): string {
   const availabilitySection = availabilityBlock
     ? `\n\n# HORÁRIOS DISPONÍVEIS (agenda real do Marcel, atualizada agora)\n${availabilityBlock}`
     : '';
-  return `${basePrompt}\n${buildLeadContext(lead)}${availabilitySection}\n\n${SDR_JSON_FORMAT}`;
+  return `${basePrompt}${buildEscalationSection(escalationRules)}\n${buildLeadContext(lead)}${availabilitySection}\n\n${SDR_JSON_FORMAT}`;
 }
 
 /**
@@ -86,10 +88,11 @@ export class SdrService {
       // chave própria configurada em Configurações → Provedor de IA, getAiClient()
       // lança e cai no catch abaixo (sem fallback pra chave da plataforma).
       const basePrompt = await this.settings.getSdrPrompt();
+      const escalationRules = await this.settings.getSdrEscalationPrompt();
       const { client, model } = await this.settings.getAiClient();
 
       const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-        { role: 'system', content: buildSystemPrompt(basePrompt, lead, availabilityBlock) },
+        { role: 'system', content: buildSystemPrompt(basePrompt, escalationRules, lead, availabilityBlock) },
         ...history,
         { role: 'user', content: incomingText },
       ];
@@ -143,7 +146,7 @@ export class SdrService {
 
       parsed.success = true;
 
-      this.logger.log(`SDR respondeu [stage=${parsed.stage}, temp=${parsed.temperature}, donaDeSchedule=${parsed.donaDeSchedule}, action=${parsed.action}]: ${parsed.reply}`);
+      this.logger.log(`SDR respondeu [stage=${parsed.stage}, temp=${parsed.temperature}, donaDeSchedule=${parsed.donaDeSchedule}, action=${parsed.action}, needsOperator=${parsed.needsOperator}]: ${parsed.reply}`);
       return parsed;
     } catch (err: any) {
       this.logger.error(`Erro no SDR: ${err.message}`);

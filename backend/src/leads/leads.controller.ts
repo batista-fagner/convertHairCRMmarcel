@@ -186,15 +186,26 @@ export class LeadsController {
   }
 
   @Patch(':id')
-  async edit(@Param('id') id: string, @Body() body: { name?: string; assignedTo?: string | null; notes?: string | null; tags?: string[] }) {
-    const data: { name?: string; assignedTo?: string | null; notes?: string | null; tags?: string[] } = {};
+  async edit(@Param('id') id: string, @Body() body: { name?: string; assignedTo?: string | null; notes?: string | null; tags?: string[]; temperature?: string | null }) {
+    const data: { name?: string; assignedTo?: string | null; notes?: string | null; tags?: string[]; temperature?: any; temperatureManual?: boolean } = {};
+    // Temperatura manual: valor válido trava (a IA não sobrescreve mais);
+    // null destrava e volta pro automático (a IA preenche na próxima mensagem).
+    if ('temperature' in body) {
+      if (body.temperature === 'quente' || body.temperature === 'morno' || body.temperature === 'frio') {
+        data.temperature = body.temperature;
+        data.temperatureManual = true;
+      } else if (body.temperature === null) {
+        data.temperature = null;
+        data.temperatureManual = false;
+      }
+    }
     if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim();
     if ('assignedTo' in body) data.assignedTo = body.assignedTo?.trim() || null;
     if ('notes' in body) data.notes = body.notes ?? null;
     if ('tags' in body) {
       data.tags = Array.from(
         new Set((Array.isArray(body.tags) ? body.tags : []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
-      ).slice(0, 20);
+      ).map((t) => t.slice(0, 30)).slice(0, 20);
     }
     const lead = await this.leadsService.update(id, data);
     this.realtime.emitLeadUpdated(lead);

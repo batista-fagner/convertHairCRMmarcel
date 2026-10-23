@@ -85,6 +85,12 @@ function CardContent({ lead, overlay = false }) {
         {lead.isMql && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
         {lead.tags?.includes('mql_premium') && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">⭐ Premium</span>}
         {temp && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${temp.className}`}>{temp.label}</span>}
+        {(lead.tags || []).filter(t => t !== 'mql_premium').slice(0, 3).map(t => (
+          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium max-w-[90px] truncate" title={t}>{t}</span>
+        ))}
+        {(lead.tags || []).filter(t => t !== 'mql_premium').length > 3 && (
+          <span className="text-[10px] text-slate-400">+{(lead.tags || []).filter(t => t !== 'mql_premium').length - 3}</span>
+        )}
         {(lead.ctwaAdTitle || lead.ctwaClid) && (
           <span
             className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium flex items-center gap-0.5 max-w-[140px]"
@@ -202,6 +208,12 @@ function LeadCard({ lead, onOpen, onEdit, onDelete }) {
         {lead.isMql && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
         {lead.tags?.includes('mql_premium') && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">⭐ Premium</span>}
         {temp && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${temp.className}`}>{temp.label}</span>}
+        {(lead.tags || []).filter(t => t !== 'mql_premium').slice(0, 3).map(t => (
+          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium max-w-[90px] truncate" title={t}>{t}</span>
+        ))}
+        {(lead.tags || []).filter(t => t !== 'mql_premium').length > 3 && (
+          <span className="text-[10px] text-slate-400">+{(lead.tags || []).filter(t => t !== 'mql_premium').length - 3}</span>
+        )}
         {(lead.ctwaAdTitle || lead.ctwaClid) && (
           <span
             className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium flex items-center gap-0.5 max-w-[140px]"
@@ -278,7 +290,7 @@ function Column({ column, leads, onOpen, onEdit, onDelete }) {
   )
 }
 
-function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes, onTagsChange }) {
+function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes, onTagsChange, onTemperatureChange }) {
   if (!lead) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -293,6 +305,7 @@ function ConversationModal({ lead, onClose, onTogglePause, onAssign, onSaveNotes
           onAssign={onAssign}
           onSaveNotes={onSaveNotes}
           onTagsChange={onTagsChange}
+          onTemperatureChange={onTemperatureChange}
         />
       </div>
     </div>
@@ -637,6 +650,23 @@ export default function KanbanLeads() {
     }
   }, [updateLeadInPlace])
 
+  const saveTemperature = useCallback(async (leadId, temperature) => {
+    updateLeadInPlace({ id: leadId, temperature, temperatureManual: !!temperature })
+    setSelected(prev => prev?.id === leadId ? { ...prev, temperature, temperatureManual: !!temperature } : prev)
+    try {
+      const res = await fetch(`${API}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ temperature }),
+      })
+      const fresh = await res.json()
+      updateLeadInPlace(fresh)
+      setSelected(prev => prev?.id === leadId ? { ...prev, temperature: fresh.temperature, temperatureManual: fresh.temperatureManual } : prev)
+    } catch (e) {
+      console.error('Erro ao salvar temperatura', e)
+    }
+  }, [updateLeadInPlace])
+
   const createLead = useCallback((lead) => {
     placeLead(lead)
   }, [placeLead])
@@ -839,7 +869,7 @@ export default function KanbanLeads() {
         </DndContext>
       )}
 
-      <ConversationModal key={selected?.id} lead={selected} onClose={() => setSelected(null)} onTogglePause={togglePause} onAssign={assignVendedor} onSaveNotes={saveNotes} onTagsChange={saveTags} />
+      <ConversationModal key={selected?.id} lead={selected} onClose={() => setSelected(null)} onTogglePause={togglePause} onAssign={assignVendedor} onSaveNotes={saveNotes} onTagsChange={saveTags} onTemperatureChange={saveTemperature} />
       <EditNameModal key={editing?.id} lead={editing} onClose={() => setEditing(null)} onSave={saveName} />
       <ConfirmDeleteModal lead={deleting} onClose={() => setDeleting(null)} onConfirm={deleteLead} />
       <CreateLeadModal open={creating} onClose={() => setCreating(false)} onCreate={createLead} />

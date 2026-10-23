@@ -86,6 +86,8 @@ function ChatSimulator() {
         action: data.action,
         appointmentDateTime: data.appointmentDateTime,
         shouldIgnore: data.shouldIgnore,
+        needsOperator: data.needsOperator,
+        operatorReason: data.operatorReason,
       }])
       setLastStage(data.stage)
       setLastTemp(data.temperature)
@@ -152,6 +154,9 @@ function ChatSimulator() {
               )}
               {msg.shouldIgnore && (
                 <p className="text-[10px] mt-0.5 font-medium text-red-500">⚠️ Encaminhado pra humano</p>
+              )}
+              {msg.needsOperator && (
+                <p className="text-[10px] mt-0.5 font-medium text-amber-600">🙋 Operador seria chamado{msg.operatorReason ? `: ${msg.operatorReason}` : ''} — IA pausaria aqui</p>
               )}
             </div>
           </div>
@@ -518,6 +523,132 @@ function SdrPromptEditor() {
         {/* Chat */}
         <div className="overflow-hidden rounded-xl" style={{ height: '680px' }}>
           <ChatSimulator />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Regras de "quando chamar o operador" — fica logo abaixo do prompt principal
+// pro Marcel ajustar sem mexer na persona/fluxo. Vazio = desligado.
+function EscalationPromptEditor() {
+  const [value, setValue] = useState('')
+  const [defaultValue, setDefaultValue] = useState('')
+  const [isCustom, setIsCustom] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    fetch(`${API}/settings/sdr-escalation-prompt`)
+      .then((r) => r.json())
+      .then((d) => {
+        setValue(d.value || '')
+        setDefaultValue(d.default || '')
+        setIsCustom(!!d.isCustom)
+      })
+      .catch((e) => console.error('Erro ao carregar regras de escalada', e))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      const res = await fetch(`${API}/settings/sdr-escalation-prompt`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      })
+      const d = await res.json()
+      setValue(d.value || '')
+      setIsCustom(true)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      console.error('Erro ao salvar regras de escalada', e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const disabled = !loading && !value.trim()
+
+  return (
+    <div className="mb-6 bg-white rounded-xl border border-amber-200 overflow-hidden">
+      <div className="px-4 py-3 bg-amber-50/70 border-b border-amber-100 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-slate-800 text-sm">Quando chamar o operador</p>
+              {disabled ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">Desligado</span>
+              ) : isCustom ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Personalizado</span>
+              ) : (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">Padrão</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Escreva as situações em que a Clara deve parar e pedir ajuda — quando não entender o lead, tiver dúvida ou o assunto fugir do escopo.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
+        <div className="lg:col-span-2 flex flex-col">
+          {loading ? (
+            <div className="flex items-center justify-center h-56 text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin" />
+            </div>
+          ) : (
+            <textarea
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              spellCheck={false}
+              rows={12}
+              className="w-full text-sm text-slate-700 border border-slate-200 rounded-lg p-3 font-mono leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-amber-300"
+              placeholder="Ex.: Chame o operador quando o lead perguntar se somos agência de tráfego..."
+            />
+          )}
+          <div className="flex items-center justify-between mt-2.5">
+            <button
+              onClick={() => setValue(defaultValue)}
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Restaurar padrão
+            </button>
+            <div className="flex items-center gap-3">
+              {saved && (
+                <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                  <CheckCircle2 className="w-4 h-4" /> Salvo
+                </span>
+              )}
+              <button
+                onClick={save}
+                disabled={saving || loading}
+                className="flex items-center gap-1.5 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 px-4 py-2 rounded-lg transition"
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-slate-50 border border-slate-100 p-3.5 text-xs text-slate-600 space-y-2.5 h-fit">
+          <p className="font-semibold text-slate-700 flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> O que acontece</p>
+          <ol className="list-decimal pl-4 space-y-1.5">
+            <li>A Clara manda uma frase curta avisando que alguém do time vai continuar.</li>
+            <li>A IA pausa nessa conversa (e o follow-up automático para junto).</li>
+            <li>Os números de <span className="font-medium">Notificação de Lead Qualificado</span> recebem um WhatsApp com o motivo e a última mensagem do lead.</li>
+          </ol>
+          <p className="text-slate-500">Pra devolver pra Clara, reative a IA no card do lead. Teste no simulador acima — ele mostra quando o operador seria chamado.</p>
+          <p className="text-slate-500">Deixe vazio pra desligar.</p>
         </div>
       </div>
     </div>
@@ -2865,6 +2996,8 @@ export default function Settings() {
       </div>
 
       <SdrPromptEditor />
+
+      <EscalationPromptEditor />
 
       <AiProviderConfig />
 

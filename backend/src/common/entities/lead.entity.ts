@@ -219,6 +219,11 @@ export class Lead {
   @Column({ name: 'temperature', type: 'varchar', nullable: true })
   temperature?: LeadTemperature;
 
+  // Operador definiu a temperatura no card — a IA para de sobrescrever (mesma
+  // ideia de kanbanStageManual). Voltar pro automático = limpar a temperatura.
+  @Column({ name: 'temperature_manual', type: 'boolean', default: false })
+  temperatureManual: boolean;
+
   @Column({ name: 'ai_paused', type: 'boolean', default: false })
   aiPaused: boolean;
 

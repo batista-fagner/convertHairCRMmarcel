@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   X, MessageCircle, PauseCircle, Bot, Paperclip, Send, FileText, Video,
-  StickyNote, ChevronDown, ChevronUp, CheckCircle2, Loader2, Tag, Plus,
+  StickyNote, ChevronDown, ChevronUp, CheckCircle2, Loader2, Tag, Plus, Pencil,
 } from 'lucide-react'
 import { formatPhone, timeAgo, TEMP_BADGE } from '../lib/leadFormat'
 import Avatar from './Avatar'
@@ -54,6 +54,7 @@ export default function LeadConversationPanel({
   onAssign,
   onSaveNotes,
   onTagsChange,
+  onTemperatureChange,
   showCloseButton = true,
 }) {
   // Hooks sempre chamados, mesmo com lead=null — o guard de "não renderiza
@@ -71,6 +72,8 @@ export default function LeadConversationPanel({
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const [tagDraft, setTagDraft] = useState('')
+  const [editingTag, setEditingTag] = useState(null) // { from, value }
+  const [knownTags, setKnownTags] = useState([])
   const [aiDisabledTags, setAiDisabledTags] = useState([])
   const [noScheduleTags, setNoScheduleTags] = useState([])
   const chatBottomRef = useRef(null)
@@ -84,6 +87,10 @@ export default function LeadConversationPanel({
     fetch(`${API}/settings/ai-disabled-tags`)
       .then(r => r.json())
       .then(d => setAiDisabledTags(d.tags || []))
+      .catch(() => {})
+    fetch(`${API}/leads/tags/all`)
+      .then(r => r.json())
+      .then(d => setKnownTags(Array.isArray(d) ? d : []))
       .catch(() => {})
     fetch(`${API}/settings/no-schedule-tags`)
       .then(r => r.json())
@@ -101,6 +108,8 @@ export default function LeadConversationPanel({
     setDraft('')
     setPendingMedia(null)
     setSendError('')
+    setEditingTag(null)
+    setTagDraft('')
   }, [lead?.id])
 
   // Scroll para o final sempre que chegar nova mensagem
@@ -136,21 +145,37 @@ export default function LeadConversationPanel({
   const blockedByTag = leadTags.some(t => aiDisabledTags.includes(t))
   const scheduleBlockedByTag = !blockedByTag && leadTags.some(t => noScheduleTags.includes(t))
 
-  // Lista pra escolher: só as tags já criadas em Configurações (pausar IA +
-  // bloquear agendamento) — o cliente escolhe da lista, não digita nada, então
-  // não tem como criar tag "errada"/sem efeito por engano.
-  const availableTags = Array.from(new Set([...aiDisabledTags, ...noScheduleTags])).filter(t => !leadTags.includes(t))
+  // Sugestões do campo livre: tags já usadas em algum lead + as de Configurações
+  // (pausar IA / bloquear agenda), menos as que este lead já tem. O operador
+  // pode digitar qualquer tag nova — só as de Configurações têm efeito na IA.
+  const suggestions = Array.from(new Set([...aiDisabledTags, ...noScheduleTags, ...knownTags])).filter(t => !leadTags.includes(t))
 
   const addTag = (value) => {
-    const clean = (value || '').trim().toLowerCase()
+    const clean = (value || '').trim().toLowerCase().slice(0, 30)
     setTagDraft('')
     if (!clean || leadTags.includes(clean) || !onTagsChange) return
     onTagsChange(lead.id, [...leadTags, clean])
+    setKnownTags(prev => (prev.includes(clean) ? prev : [...prev, clean].sort()))
   }
 
   const removeTag = (tag) => {
     if (!onTagsChange) return
     onTagsChange(lead.id, leadTags.filter(t => t !== tag))
+  }
+
+  // Renomeia a tag só neste lead (mantém a posição). Se o novo nome já existe
+  // no lead, apenas funde (remove a duplicada); vazio = cancela.
+  const commitRename = () => {
+    if (!editingTag) return
+    const { from, value } = editingTag
+    const clean = (value || '').trim().toLowerCase().slice(0, 30)
+    setEditingTag(null)
+    if (!clean || clean === from || !onTagsChange) return
+    const next = leadTags.includes(clean)
+      ? leadTags.filter(t => t !== from)
+      : leadTags.map(t => (t === from ? clean : t))
+    onTagsChange(lead.id, next)
+    setKnownTags(prev => (prev.includes(clean) ? prev : [...prev, clean].sort()))
   }
 
   const handleFileSelect = (e) => {
@@ -245,10 +270,24 @@ export default function LeadConversationPanel({
         </div>
         <div className="flex items-center gap-1.5">
           {lead.isMql && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
-          {TEMP_BADGE[lead.temperature] && (
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${TEMP_BADGE[lead.temperature].className}`}>
-              {TEMP_BADGE[lead.temperature].label}
-            </span>
+          {onTemperatureChange ? (
+            <select
+              value={lead.temperature || ''}
+              onChange={e => onTemperatureChange(lead.id, e.target.value || null)}
+              title={lead.temperatureManual ? 'Definida por você — a IA não altera mais' : 'Automática (definida pela IA). Escolha pra fixar manualmente.'}
+              className={`text-[10px] pl-2 pr-1 py-0.5 rounded-full font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-violet-300 ${TEMP_BADGE[lead.temperature]?.className || 'bg-slate-100 text-slate-500'}`}
+            >
+              <option value="">Sem temperatura (auto)</option>
+              <option value="quente">{TEMP_BADGE.quente.label}</option>
+              <option value="morno">{TEMP_BADGE.morno.label}</option>
+              <option value="frio">{TEMP_BADGE.frio.label}</option>
+            </select>
+          ) : (
+            TEMP_BADGE[lead.temperature] && (
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${TEMP_BADGE[lead.temperature].className}`}>
+                {TEMP_BADGE[lead.temperature].label}
+              </span>
+            )
           )}
         </div>
         {showCloseButton && onClose && (
@@ -340,38 +379,59 @@ export default function LeadConversationPanel({
                     : undefined
                 }
               >
-                {tag}
-                <button onClick={() => removeTag(tag)} className="hover:text-red-500 transition">
+                {editingTag?.from === tag ? (
+                  <input
+                    autoFocus
+                    value={editingTag.value}
+                    onChange={e => setEditingTag({ from: tag, value: e.target.value })}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitRename()
+                      if (e.key === 'Escape') setEditingTag(null)
+                    }}
+                    onBlur={commitRename}
+                    maxLength={30}
+                    className="w-24 bg-white border border-violet-300 rounded px-1 text-[11px] focus:outline-none"
+                  />
+                ) : (
+                  <>
+                    {tag}
+                    <button onClick={() => setEditingTag({ from: tag, value: tag })} className="hover:text-violet-600 transition" title="Renomear tag">
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  </>
+                )}
+                <button onClick={() => removeTag(tag)} className="hover:text-red-500 transition" title="Remover tag">
                   <X className="w-3 h-3" />
                 </button>
               </span>
             )
           })}
-          {availableTags.length > 0 ? (
-            <div className="flex items-center gap-1.5">
-              <select
-                value={tagDraft}
-                onChange={e => setTagDraft(e.target.value)}
-                className="text-[11px] border border-slate-200 rounded-full pl-2.5 pr-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white text-slate-600"
-              >
-                <option value="">Selecione uma tag...</option>
-                {availableTags.map(t => (
-                  <option key={t} value={t}>
-                    {t} {aiDisabledTags.includes(t) ? '(pausa IA)' : '(bloqueia agenda)'}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => addTag(tagDraft)}
-                disabled={!tagDraft}
-                className="flex items-center gap-1 text-[11px] font-medium text-white bg-violet-500 hover:bg-violet-600 disabled:bg-slate-200 disabled:cursor-not-allowed px-2.5 py-1 rounded-full transition"
-              >
-                <Plus className="w-3 h-3" /> Salvar
-              </button>
-            </div>
-          ) : (
-            <span className="text-[11px] text-slate-400">Nenhuma tag criada ainda — crie em Configurações.</span>
-          )}
+          <div className="flex items-center gap-1.5">
+            <input
+              list="lead-tag-suggestions"
+              value={tagDraft}
+              onChange={e => setTagDraft(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addTag(tagDraft)}
+              maxLength={30}
+              placeholder="Nova tag..."
+              className="w-32 text-[11px] border border-slate-200 rounded-full px-2.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-300 bg-white text-slate-600"
+            />
+            <datalist id="lead-tag-suggestions">
+              {suggestions.map(t => (
+                <option key={t} value={t}>
+                  {aiDisabledTags.includes(t) ? 'pausa a IA' : noScheduleTags.includes(t) ? 'bloqueia agenda' : ''}
+                </option>
+              ))}
+            </datalist>
+            <button
+              onClick={() => addTag(tagDraft)}
+              disabled={!tagDraft.trim()}
+              className="flex items-center gap-1 text-[11px] font-medium text-white bg-violet-500 hover:bg-violet-600 disabled:bg-slate-200 disabled:cursor-not-allowed px-2.5 py-1 rounded-full transition"
+            >
+              <Plus className="w-3 h-3" /> Adicionar
+            </button>
+          </div>
+          {leadTags.length === 0 && <span className="text-[11px] text-slate-400">Sem tags — digite uma e tecle Enter.</span>}
         </div>
       )}
 

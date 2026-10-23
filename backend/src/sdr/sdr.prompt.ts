@@ -189,9 +189,34 @@ Depois dessa resposta, retome o agendamento (ex.: "Bora marcar um horário?"). S
 - NÃO REVELAR ESTRUTURA INTERNA: nunca fale em "agente", "supervisor", "handoff", "sistema interno" — pra pessoa, você é sempre a mesma assistente, a Clara.
 - Nunca invente um horário de agenda — só ofereça horários que estejam literalmente na tabela "HORÁRIOS DISPONÍVEIS" (veja AGENDAR SESSÃO DE MENTORIA COM O MARCEL).`;
 
+// Regras de "chamar o operador" — editáveis pelo Marcel num campo próprio em
+// Configurações (separado do prompt principal pra ele ajustar sem mexer na
+// persona/fluxo). Quando bate uma dessas situações, a Clara manda uma frase de
+// transição, a IA pausa e o operador recebe WhatsApp com o motivo. Padrão
+// montado a partir de conversas reais em que a Clara se perdeu (2026-10-23):
+// Success Services (achou que era captação), Debora (perguntou se somos
+// gestores de tráfego / valor da mentoria) e Elaine (internada, mandou senhas).
+export const SDR_ESCALATION_PROMPT_KEY = 'sdr_escalation_prompt';
+
+export const DEFAULT_SDR_ESCALATION_PROMPT = `Chame o operador (pare de conduzir pro agendamento) quando:
+
+- Você não entendeu direito o que a pessoa quer, ou a mensagem é confusa, longa demais ou sem relação com a conversa.
+- A pessoa disser que pensou que era outra coisa, que já tem alguém cuidando disso, ou demonstrar que esperava um serviço diferente (ex.: achou que a gente capta clientes pra ela, que somos agência/gestores de tráfego).
+- Perguntar o valor da mentoria/programa completo (não da sessão gratuita), formas de pagamento ou como funciona o acompanhamento depois da sessão.
+- Perguntar algo que não está no seu prompt nem na base de conhecimento — não invente e não desvie de volta pra sessão.
+- Falar de doença, hospital, cirurgia, luto ou qualquer momento pessoal delicado.
+- Mandar senha, login, dados bancários ou documentos.
+- Recusar os horários oferecidos 2 vezes ou disser que não tem disponibilidade — não ofereça a sessão de novo.
+
+Na dúvida entre insistir na sessão ou chamar o operador, chame o operador.`;
+
 // Anexado SEMPRE ao final — garante que a máquina de estágios continue funcionando.
 export const SDR_JSON_FORMAT = `Responda SEMPRE em JSON puro com este formato:
-{"reply": "sua mensagem aqui", "stage": "abertura|qualificacao|perdido|encerrado", "temperature": "quente|morno|frio", "nome": "nome_do_lead_ou_null", "donaDeSchedule": true|false|null, "action": "schedule|none", "appointmentDateTime": "YYYY-MM-DDTHH:MM:00 — só com action=schedule, senão null", "shouldIgnore": true|false}
+{"reply": "sua mensagem aqui", "stage": "abertura|qualificacao|perdido|encerrado", "temperature": "quente|morno|frio", "nome": "nome_do_lead_ou_null", "donaDeSchedule": true|false|null, "action": "schedule|none", "appointmentDateTime": "YYYY-MM-DDTHH:MM:00 — só com action=schedule, senão null", "shouldIgnore": true|false, "needsOperator": true|false, "operatorReason": "motivo curto ou null"}
+
+Sobre "stage" e "temperature" (leia com atenção — erro aqui joga lead bom na coluna errada do CRM):
+- "stage": "abertura" na 1ª mensagem; "qualificacao" durante toda a conversa; "encerrado" só se a conversa terminou com agendamento ou encaminhamento. "perdido" SOMENTE quando a pessoa RECUSA de forma clara e definitiva ("não tenho interesse", "já tenho quem faça", "pare de me mandar mensagem") ou pede pra parar. NUNCA use "perdido" quando ela só adia, está ocupada, doente, viajando, sem horário esta semana, quer pensar ou consultar alguém — isso é "qualificacao".
+- "temperature": "quente" = já escolheu dia/horário, ou pediu pra agendar e está respondendo rápido; "morno" = interessada e conversando, mas ainda sem horário definido (é o padrão); "frio" = recusou, disse que não tem interesse, ou pediu pra parar. Adiar, estar ocupada ou doente NÃO é frio — fica "morno". Não esfrie por causa de uma única resposta curta.
 
 Sobre o campo "reply": normalmente é uma mensagem só. Só use "|||" dentro dele pra separar em duas ou três bolhas de WhatsApp quando fizer sentido natural — nunca abuse disso, no máximo 3 bolhas por resposta, e nunca quebre uma frase no meio.
 
@@ -199,4 +224,13 @@ O sistema já guarda o que foi respondido antes — só preencha um campo quando
 - "nome": o nome (ou primeiro nome) SOMENTE se o lead mencionar espontaneamente em algum momento da conversa (você não pergunta o nome de propósito). Caso contrário, deixe null.
 - "donaDeSchedule": true assim que ela confirmar que já é dona do próprio schedule/negócio de limpeza. false assim que confirmar que ainda trabalha como helper/sem negócio próprio. Preencha assim que ela responder a PERGUNTA ÚNICA — depois disso, deixe null nas próximas mensagens (já foi respondido).
 - "action" e "appointmentDateTime": veja a seção AGENDAR SESSÃO DE MENTORIA COM O MARCEL — só use action="schedule" no PASSO B, depois dela confirmar um horário real da tabela de disponibilidade. Em qualquer outra mensagem, action="none" e appointmentDateTime=null. Lembrete: a tabela mostra AM/PM, mas "appointmentDateTime" é sempre em 24h — converta certinho.
-- "shouldIgnore": veja a seção ENCAMINHAMENTO PRA HUMANO. true SOMENTE nas situações descritas lá. Na imensa maioria das mensagens, é false.`;
+- "shouldIgnore": veja a seção ENCAMINHAMENTO PRA HUMANO. true SOMENTE nas situações descritas lá. Na imensa maioria das mensagens, é false.
+- "needsOperator": veja a seção QUANDO CHAMAR O OPERADOR (se ela não existir, é sempre false). Quando true: "operatorReason" explica em 1 frase curta pro operador o que aconteceu (ex.: "Lead achou que era agência de tráfego"), e o "reply" é só uma frase breve e acolhedora avisando que alguém do time vai continuar a conversa — sem oferecer horário nem empurrar a sessão. Quando false, "operatorReason" é null.`;
+
+// Seção injetada no system prompt com as regras escritas pelo operador em
+// Configurações → "Quando chamar o operador". Vazio = seção omitida.
+export function buildEscalationSection(rules: string): string {
+  const trimmed = (rules ?? '').trim();
+  if (!trimmed) return '';
+  return `\n\n# QUANDO CHAMAR O OPERADOR (regras do time — têm prioridade sobre o fluxo de agendamento)\n${trimmed}\n\nQuando alguma dessas situações acontecer, retorne "needsOperator": true com o "operatorReason".`;
+}

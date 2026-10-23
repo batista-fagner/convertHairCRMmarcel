@@ -702,6 +702,13 @@ export class SdrController {
 
     const handoff = !alreadyHandedOff && (explicitEscalation || (readyForHandoff && (bookedNow || !availability.hasSlots)));
 
+    // Escalada por dúvida (regras do Marcel em Configurações → "Quando chamar o
+    // operador"): a Clara não entendeu, o lead esperava outra coisa, assunto
+    // fora do escopo etc. Diferente do handoff: não encerra o lead nem mexe na
+    // raia — só pausa a IA (o que também para o follow-up) e avisa o operador
+    // com o motivo, pra ele assumir antes da Clara insistir na sessão.
+    const operatorEscalation = ai.needsOperator === true && !handoff && !bookedNow;
+
     // Estágio terminal quando faz handoff
     const newStage: SdrStage = handoff ? 'encerrado' : ai.stage;
 
@@ -716,16 +723,18 @@ export class SdrController {
     const updateData: any = {
       aiContext: updatedContext,
       waStage: newStage as any,
-      temperature: ai.temperature,
       waLastMessageAt: new Date(),
       followupSentAt: null,
       donaDeSchedule,
     };
 
+    // Operador fixou a temperatura no card → a IA não sobrescreve.
+    if (!lead.temperatureManual) updateData.temperature = ai.temperature;
+
     if (nomeValue) updateData.name = nomeValue;
 
     // Handoff → operador assume, IA desliga
-    if (handoff) {
+    if (handoff || operatorEscalation) {
       updateData.aiPaused = true;
     }
 
@@ -768,6 +777,10 @@ export class SdrController {
       // sessão já marcada (achado 2026-09-18: lead Sergio escalado por não
       // haver horário disponível no fim da tarde, mensagem genérica confundiu).
       await this.notifyOperator(lead, bookedAtDateTime ?? undefined, !bookedAtDateTime);
+      this.realtime.emitLeadHandoff(lead);
+    } else if (operatorEscalation) {
+      this.logger.warn(`[SDR][OPERADOR] IA pausada e operador chamado para ${phone} — motivo: ${ai.operatorReason ?? '(não informado)'}`);
+      await this.notifyOperatorEscalation(lead, ai.operatorReason ?? null, text);
       this.realtime.emitLeadHandoff(lead);
     } else {
       this.realtime.emitLeadUpdated(lead);
@@ -821,6 +834,31 @@ export class SdrController {
             { headers: { token: this.uazapiToken } },
           ),
         ).catch((err: any) => this.logger.error(`[SDR] Erro ao notificar loop ${phone}: ${err.message}`)),
+      ),
+    );
+  }
+
+  /** Avisa o operador que a Clara pediu ajuda (regras de "Quando chamar o operador") e foi pausada. */
+  private async notifyOperatorEscalation(lead: Lead, reason: string | null, lastLeadMessage: string) {
+    const stored = await this.settings.get(SDR_NOTIFY_PHONES_KEY);
+    const phones: string[] = stored
+      ? stored.split(',').map((p) => p.trim()).filter(Boolean)
+      : this.operatorPhone ? [this.operatorPhone] : [];
+
+    if (phones.length === 0) return;
+
+    const excerpt = lastLeadMessage.length > 300 ? `${lastLeadMessage.slice(0, 300)}…` : lastLeadMessage;
+    const msg = `🙋 A Clara precisa de você!\n\nNome: ${lead.name}\nWhatsApp: ${lead.phone}\nMotivo: ${reason || 'não informado'}\n\nÚltima mensagem do lead:\n"${excerpt}"\n\nA IA foi pausada nessa conversa — assuma por aqui. Pra devolver pra Clara, reative a IA no card do lead.`;
+
+    await Promise.allSettled(
+      phones.map((phone) =>
+        firstValueFrom(
+          this.http.post(
+            `${this.uazapiBaseUrl}/send/text`,
+            { number: phone, text: msg },
+            { headers: { token: this.uazapiToken } },
+          ),
+        ).catch((err: any) => this.logger.error(`[SDR] Erro ao notificar escalada ${phone}: ${err.message}`)),
       ),
     );
   }

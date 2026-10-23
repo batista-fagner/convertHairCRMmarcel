@@ -1,6 +1,6 @@
 import { Controller, Get, Put, Post, Body, BadRequestException } from '@nestjs/common';
 import { SettingsService } from './settings.service';
-import { SDR_PROMPT_KEY, DEFAULT_SDR_PROMPT, SDR_MODEL_KEY, SDR_DEFAULT_MODEL } from '../sdr/sdr.prompt';
+import { SDR_PROMPT_KEY, DEFAULT_SDR_PROMPT, SDR_MODEL_KEY, SDR_DEFAULT_MODEL, SDR_ESCALATION_PROMPT_KEY, DEFAULT_SDR_ESCALATION_PROMPT } from '../sdr/sdr.prompt';
 import { SDR_NOTIFY_PHONES_KEY } from '../sdr/sdr.controller';
 
 @Controller('settings')
@@ -17,6 +17,20 @@ export class SettingsController {
   async setSdrPrompt(@Body() body: { value: string }) {
     const value = (body.value ?? '').trim();
     const saved = await this.settingsService.set(SDR_PROMPT_KEY, value || DEFAULT_SDR_PROMPT);
+    return { value: saved.value, isCustom: true };
+  }
+
+  // Regras de "quando chamar o operador" — campo separado do prompt principal.
+  // Salvar vazio é permitido (desliga a escalada por dúvida), diferente do prompt.
+  @Get('sdr-escalation-prompt')
+  async getSdrEscalationPrompt() {
+    const value = await this.settingsService.get(SDR_ESCALATION_PROMPT_KEY);
+    return { value: value ?? DEFAULT_SDR_ESCALATION_PROMPT, isCustom: value != null, default: DEFAULT_SDR_ESCALATION_PROMPT };
+  }
+
+  @Put('sdr-escalation-prompt')
+  async setSdrEscalationPrompt(@Body() body: { value: string }) {
+    const saved = await this.settingsService.set(SDR_ESCALATION_PROMPT_KEY, (body.value ?? '').trim());
     return { value: saved.value, isCustom: true };
   }
 

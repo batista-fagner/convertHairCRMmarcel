@@ -8,6 +8,9 @@ import {
   SDR_PROMPT_KEY,
   DEFAULT_SDR_PROMPT,
   SDR_JSON_FORMAT,
+  SDR_ESCALATION_PROMPT_KEY,
+  DEFAULT_SDR_ESCALATION_PROMPT,
+  buildEscalationSection,
   SDR_MODEL_KEY,
   SDR_DEFAULT_MODEL,
   AI_PROVIDER_API_KEY_ENC,
@@ -214,11 +217,18 @@ export class SettingsService {
     return (await this.get(SDR_PROMPT_KEY)) || DEFAULT_SDR_PROMPT;
   }
 
+  /** Regras de "quando chamar o operador" (Configurações). Nunca salvo = padrão; salvo vazio = desligado. */
+  async getSdrEscalationPrompt(): Promise<string> {
+    if (this.forceCodePrompt) return DEFAULT_SDR_ESCALATION_PROMPT;
+    return (await this.get(SDR_ESCALATION_PROMPT_KEY)) ?? DEFAULT_SDR_ESCALATION_PROMPT;
+  }
+
   async simulate(message: string, history: { role: 'user' | 'assistant'; content: string }[]) {
     const basePrompt = await this.getSdrPrompt();
+    const escalationRules = await this.getSdrEscalationPrompt();
     const { client, model } = await this.getAiClient();
     const availability = await this.availabilityService.buildAvailabilityBlock();
-    const systemPrompt = `${basePrompt}\n\n# HORÁRIOS DISPONÍVEIS (agenda real do Marcel, atualizada agora)\n${availability.text}\n\n${SDR_JSON_FORMAT}`;
+    const systemPrompt = `${basePrompt}${buildEscalationSection(escalationRules)}\n\n# HORÁRIOS DISPONÍVEIS (agenda real do Marcel, atualizada agora)\n${availability.text}\n\n${SDR_JSON_FORMAT}`;
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -235,7 +245,9 @@ export class SettingsService {
       model,
       messages,
       temperature: 0.7,
-      max_completion_tokens: 300,
+      // Mesmo budget da produção (sdr.service.ts) — com 300 o JSON maior
+      // (needsOperator/operatorReason) truncava em modelos de raciocínio.
+      max_completion_tokens: 900,
       response_format: { type: 'json_object' },
       ...(isGemini ? ({ reasoning_effort: 'none' } as any) : {}),
     });
@@ -255,6 +267,8 @@ export class SettingsService {
       action: parsed.action ?? 'none',
       appointmentDateTime: parsed.appointmentDateTime ?? null,
       shouldIgnore: parsed.shouldIgnore ?? false,
+      needsOperator: parsed.needsOperator === true,
+      operatorReason: parsed.operatorReason ?? null,
     };
   }
 }
