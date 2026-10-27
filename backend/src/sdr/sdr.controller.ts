@@ -85,7 +85,7 @@ export class SdrController {
 
   // Tempo de espera antes de considerar que o lead "não vai iniciar sozinho" e
   // mandar a abertura proativa (ver checkNeverStartedLeads abaixo).
-  private static readonly NEVER_STARTED_WAIT_MINUTES = 5;
+  private static readonly NEVER_STARTED_WAIT_SECONDS = 40;
 
   // Leads criados antes do deploy dessa feature (ex.: Jaqueline/Flavia, que já
   // têm envio agendado separadamente pras 9am de NY) não entram nesse cron —
@@ -130,7 +130,7 @@ export class SdrController {
 
   /**
    * A cada minuto, varre leads do SDR que nunca trocaram nenhuma mensagem e já
-   * passaram do prazo de espera (5min desde created_at) — manda a abertura
+   * passaram do prazo de espera (40s desde created_at) — manda a abertura
    * proativa automaticamente. Se o lead iniciar sozinho antes disso, ele sai
    * da consulta (wa_last_message_at deixa de ser null) e o fluxo normal segue,
    * sem essa abordagem. `checkingNeverStarted` evita rodar 2x sobreposto
@@ -141,7 +141,7 @@ export class SdrController {
     if (this.checkingNeverStarted) return;
     this.checkingNeverStarted = true;
     try {
-      const cutoff = new Date(Date.now() - SdrController.NEVER_STARTED_WAIT_MINUTES * 60 * 1000);
+      const cutoff = new Date(Date.now() - SdrController.NEVER_STARTED_WAIT_SECONDS * 1000);
       const disabledTags = await this.settings.getAiDisabledTags();
       const leads = await this.leadsService.findNeverStartedOlderThan(
         cutoff,
