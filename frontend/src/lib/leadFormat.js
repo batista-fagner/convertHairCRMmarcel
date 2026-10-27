@@ -54,3 +54,27 @@ export const TEMP_BADGE = {
   morno:  { label: '🌤 Morno',  className: 'bg-amber-100 text-amber-700' },
   frio:   { label: '❄️ Frio',   className: 'bg-cyan-100 text-cyan-700' },
 }
+
+// MQL da Clara: dona do próprio schedule, ou o operador pôs em Qualificado/Vendeu.
+// Mesma regra do Dashboard (getDashboard em leads.service.ts) — `isMql` sozinho
+// era do fluxo do Efraim e nunca é preenchido aqui.
+export function isMqlLead(lead) {
+  return !!(lead?.isMql || lead?.donaDeSchedule === true || ['qualificado', 'vendeu'].includes(lead?.kanbanStage))
+}
+
+// Landing page de onde o lead veio (webhook de captura → ghlContext.funnel):
+// caminho da URL sem domínio/query, ex. "pagina-v1". null = não passou por página.
+export function landingPageOf(lead) {
+  const funnel = lead?.ghlContext?.funnel
+  if (!funnel) return null
+  const url = funnel.landing_url || ''
+  if (url) {
+    try {
+      const path = new URL(url).pathname.replace(/^\/+|\/+$/g, '')
+      return { label: path || new URL(url).hostname, url: url.split('?')[0] }
+    } catch {
+      // URL malformada — cai no page_version abaixo
+    }
+  }
+  return funnel.page_version ? { label: funnel.page_version, url: null } : null
+}

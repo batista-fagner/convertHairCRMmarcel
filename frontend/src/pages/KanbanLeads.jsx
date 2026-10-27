@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { DndContext, DragOverlay, useDraggable, useDroppable, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { io } from 'socket.io-client'
-import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, Send, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Plus, Megaphone, Search, Layers, CalendarCheck, AlertTriangle, Download } from 'lucide-react'
-import { formatPhone, timeAgo, TEMP_BADGE } from '../lib/leadFormat'
+import { Flame, Snowflake, UserPlus, XCircle, Phone, Mail, UserCheck, Loader2, X, Send, MoreVertical, Pencil, Trash2, Play, Eye, Handshake, Trophy, HeadphonesIcon, Plus, Megaphone, Search, Layers, CalendarCheck, AlertTriangle, Download, Globe } from 'lucide-react'
+import { formatPhone, timeAgo, TEMP_BADGE, isMqlLead, landingPageOf } from '../lib/leadFormat'
 import Avatar from '../components/Avatar'
 import LeadConversationPanel from '../components/LeadConversationPanel'
 
@@ -82,7 +82,7 @@ function CardContent({ lead, overlay = false }) {
       {msg && <p className="text-[11px] text-slate-500 mt-2 line-clamp-2 italic">"{msg}"</p>}
 
       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-        {lead.isMql && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
+        {isMqlLead(lead) && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
         {lead.tags?.includes('mql_premium') && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">⭐ Premium</span>}
         {temp && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${temp.className}`}>{temp.label}</span>}
         {(lead.tags || []).filter(t => t !== 'mql_premium').slice(0, 3).map(t => (
@@ -97,6 +97,14 @@ function CardContent({ lead, overlay = false }) {
             title={lead.ctwaAdTitle ? `Anúncio: ${lead.ctwaAdTitle}` : 'Veio de anúncio (Click-to-WhatsApp)'}
           >
             <Megaphone className="w-3 h-3 shrink-0" /> <span className="truncate">{lead.ctwaAdTitle || 'Anúncio'}</span>
+          </span>
+        )}
+        {landingPageOf(lead) && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium flex items-center gap-0.5 max-w-[140px]"
+            title={`Landing page: ${landingPageOf(lead).url || landingPageOf(lead).label}`}
+          >
+            <Globe className="w-3 h-3 shrink-0" /> <span className="truncate">{landingPageOf(lead).label}</span>
           </span>
         )}
         {lead._handoff && (
@@ -205,7 +213,7 @@ function LeadCard({ lead, onOpen, onEdit, onDelete }) {
       {msg && <p className="text-[11px] text-slate-500 mt-2 line-clamp-2 italic">"{msg}"</p>}
 
       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-        {lead.isMql && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
+        {isMqlLead(lead) && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">🎯 MQL</span>}
         {lead.tags?.includes('mql_premium') && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">⭐ Premium</span>}
         {temp && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${temp.className}`}>{temp.label}</span>}
         {(lead.tags || []).filter(t => t !== 'mql_premium').slice(0, 3).map(t => (
@@ -220,6 +228,14 @@ function LeadCard({ lead, onOpen, onEdit, onDelete }) {
             title={lead.ctwaAdTitle ? `Anúncio: ${lead.ctwaAdTitle}` : 'Veio de anúncio (Click-to-WhatsApp)'}
           >
             <Megaphone className="w-3 h-3 shrink-0" /> <span className="truncate">{lead.ctwaAdTitle || 'Anúncio'}</span>
+          </span>
+        )}
+        {landingPageOf(lead) && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium flex items-center gap-0.5 max-w-[140px]"
+            title={`Landing page: ${landingPageOf(lead).url || landingPageOf(lead).label}`}
+          >
+            <Globe className="w-3 h-3 shrink-0" /> <span className="truncate">{landingPageOf(lead).label}</span>
           </span>
         )}
         {lead._handoff && (

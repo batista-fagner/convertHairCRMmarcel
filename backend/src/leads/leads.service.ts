@@ -258,6 +258,71 @@ export class LeadsService {
     return { total, totalMql, byStatus, byWaStage, conversionRate, recent };
   }
 
+  /**
+   * Números do Dashboard (tenant Clara/Pro Cleaning), por coorte: só leads do
+   * SDR CRIADOS no período (from/to em datas de São Paulo, mesmo padrão do
+   * Analytics). MQL aqui = dona do próprio schedule (regra da Clara, ver
+   * deriveKanbanStage) ou operador colocou em Qualificado/Vendeu — `is_mql`
+   * sozinho nunca é preenchido nesse fluxo (era do Efraim), por isso ficava 0.
+   * Conversão = raia "Vendeu" ÷ leads do período.
+   */
+  async getDashboard(from?: string, to?: string) {
+    const params: string[] = [];
+    const dateFilter = this.appendDateFilter(params, from, to);
+    const where = `agent_mode = 'sdr'${dateFilter}`;
+    const mql = `(is_mql OR dona_de_schedule = true OR kanban_stage IN ('qualificado', 'vendeu'))`;
+    const responded = `EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(ai_context, '[]'::jsonb)) m WHERE m->>'role' = 'user')`;
+    // Página de origem = caminho da landing_url do webhook de captura (sem
+    // domínio nem query string), ex. "pagina-v1". Sem ghl_context = lead que
+    // chegou direto no WhatsApp, sem passar por página.
+    const landing = `NULLIF(trim(both '/' from regexp_replace(split_part(ghl_context->'funnel'->>'landing_url', '?', 1), '^https?://[^/]+', '')), '')`;
+
+    const [[totals], byKanban, byLanding, recent] = await Promise.all([
+      this.leadsRepo.query(
+        `SELECT
+           COUNT(*)::int AS "total",
+           COUNT(*) FILTER (WHERE ${responded})::int AS "responded",
+           COUNT(*) FILTER (WHERE ${mql})::int AS "mql",
+           COUNT(*) FILTER (WHERE kanban_stage IN ('agendado', 'vendeu'))::int AS "scheduled",
+           COUNT(*) FILTER (WHERE kanban_stage = 'vendeu')::int AS "sold",
+           COUNT(*) FILTER (WHERE kanban_stage = 'nao-qualificado')::int AS "disqualified"
+         FROM leads WHERE ${where}`,
+        params,
+      ),
+      this.leadsRepo.query(
+        `SELECT kanban_stage AS "stage", COUNT(*)::int AS "count" FROM leads WHERE ${where} GROUP BY kanban_stage`,
+        params,
+      ),
+      this.leadsRepo.query(
+        `SELECT
+           CASE WHEN ghl_context IS NULL THEN NULL ELSE COALESCE(${landing}, ghl_context->'funnel'->>'page_version', 'página sem URL') END AS "page",
+           COUNT(*)::int AS "total",
+           COUNT(*) FILTER (WHERE ${mql})::int AS "mql",
+           COUNT(*) FILTER (WHERE kanban_stage IN ('agendado', 'vendeu'))::int AS "scheduled",
+           COUNT(*) FILTER (WHERE kanban_stage = 'vendeu')::int AS "sold"
+         FROM leads WHERE ${where}
+         GROUP BY 1 ORDER BY 2 DESC`,
+        params,
+      ),
+      this.leadsRepo.query(
+        `SELECT id, name, phone, kanban_stage AS "kanbanStage", created_at AS "createdAt", COALESCE(${mql}, false) AS "isMql",
+                CASE WHEN ghl_context IS NULL THEN NULL ELSE COALESCE(${landing}, ghl_context->'funnel'->>'page_version') END AS "page"
+         FROM leads WHERE ${where} ORDER BY created_at DESC LIMIT 6`,
+        params,
+      ),
+    ]);
+
+    const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
+    return {
+      ...totals,
+      mqlRate: pct(totals.mql, totals.total),
+      conversionRate: pct(totals.sold, totals.total),
+      byKanban: Object.fromEntries(byKanban.map((r: { stage: string; count: number }) => [r.stage, r.count])),
+      byLanding,
+      recent,
+    };
+  }
+
   async findKanban(campaign?: string): Promise<Record<KanbanStage, Lead[]>> {
     const query = this.leadsRepo
       .createQueryBuilder('lead')

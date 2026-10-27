@@ -119,6 +119,11 @@ export class LeadsController {
     return this.leadsService.getStats();
   }
 
+  @Get('dashboard')
+  async getDashboard(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.leadsService.getDashboard(from, to);
+  }
+
   // Lista de conversas pro Inbox WhatsApp (tela separada do Kanban, pra
   // operador escrever manualmente e ativar leads importados). filter:
   // all | imported | never-contacted
