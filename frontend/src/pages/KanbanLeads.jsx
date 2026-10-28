@@ -704,9 +704,9 @@ export default function KanbanLeads() {
     }
   }, [updateLeadInPlace])
 
-  // Carrega a lista de campanhas uma vez pro dropdown, e já seleciona a mais
-  // recente como filtro padrão (evita abrir o board com campanhas antigas
-  // misturadas). Usuário pode trocar pra "Todas" ou "Órfão" quando quiser.
+  // Carrega a lista de campanhas uma vez pro dropdown. O board abre em "Todas
+  // as campanhas" (pedido do Marcel) — o operador filtra uma campanha ou
+  // "Órfão" quando quiser.
   useEffect(() => {
     let active = true
     fetch(`${API}/leads/kanban/campaigns`)
@@ -714,8 +714,6 @@ export default function KanbanLeads() {
       .then((rows) => {
         if (!active) return
         setCampaigns(rows || [])
-        const latestReal = (rows || []).find((r) => r.campaign)
-        if (latestReal) setCampaignFilter(latestReal.campaign)
       })
       .catch((e) => console.error('Erro ao carregar campanhas', e))
     return () => { active = false }

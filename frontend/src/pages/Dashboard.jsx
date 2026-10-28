@@ -98,7 +98,7 @@ export default function Dashboard() {
     {
       label: 'MQLs',
       value: mql.toLocaleString('pt-BR'),
-      sub: `${mqlRate.toLocaleString('pt-BR')}% dos leads · dona do próprio schedule`,
+      sub: `${mqlRate.toLocaleString('pt-BR')}% dos leads · dona do schedule ou agendou`,
       icon: Target,
       color: 'text-emerald-600',
       bg: 'bg-emerald-50',
@@ -121,7 +121,7 @@ export default function Dashboard() {
     },
   ]
 
-  // Funil acumulado: cada etapa é um subconjunto (ou quase) da anterior.
+  // Funil acumulado: cada etapa é subconjunto da anterior (todo agendado é MQL).
   const funnelSteps = [
     { label: 'Leads', count: total, color: 'bg-slate-400' },
     { label: 'Responderam', count: responded, color: 'bg-indigo-400' },

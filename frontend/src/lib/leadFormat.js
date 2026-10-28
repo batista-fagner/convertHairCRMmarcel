@@ -55,11 +55,12 @@ export const TEMP_BADGE = {
   frio:   { label: '❄️ Frio',   className: 'bg-cyan-100 text-cyan-700' },
 }
 
-// MQL da Clara: dona do próprio schedule, ou o operador pôs em Qualificado/Vendeu.
-// Mesma regra do Dashboard (getDashboard em leads.service.ts) — `isMql` sozinho
-// era do fluxo do Efraim e nunca é preenchido aqui.
+// MQL da Clara: dona do próprio schedule, ou lead em Qualificado/Agendado/Vendeu
+// (todo agendado conta, mesmo helper). Mesma regra do Dashboard (getDashboard
+// em leads.service.ts) — `isMql` sozinho era do fluxo do Efraim e nunca é
+// preenchido aqui.
 export function isMqlLead(lead) {
-  return !!(lead?.isMql || lead?.donaDeSchedule === true || ['qualificado', 'vendeu'].includes(lead?.kanbanStage))
+  return !!(lead?.isMql || lead?.donaDeSchedule === true || ['qualificado', 'agendado', 'vendeu'].includes(lead?.kanbanStage))
 }
 
 // Landing page de onde o lead veio (webhook de captura → ghlContext.funnel):

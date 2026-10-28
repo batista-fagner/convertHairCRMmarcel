@@ -262,15 +262,16 @@ export class LeadsService {
    * Números do Dashboard (tenant Clara/Pro Cleaning), por coorte: só leads do
    * SDR CRIADOS no período (from/to em datas de São Paulo, mesmo padrão do
    * Analytics). MQL aqui = dona do próprio schedule (regra da Clara, ver
-   * deriveKanbanStage) ou operador colocou em Qualificado/Vendeu — `is_mql`
-   * sozinho nunca é preenchido nesse fluxo (era do Efraim), por isso ficava 0.
+   * deriveKanbanStage) ou lead em Qualificado/Agendado/Vendeu — todo agendado
+   * conta como MQL, mesmo helper (decisão do Marcel/Fagner). `is_mql` sozinho
+   * nunca é preenchido nesse fluxo (era do Efraim), por isso ficava 0.
    * Conversão = raia "Vendeu" ÷ leads do período.
    */
   async getDashboard(from?: string, to?: string) {
     const params: string[] = [];
     const dateFilter = this.appendDateFilter(params, from, to);
     const where = `agent_mode = 'sdr'${dateFilter}`;
-    const mql = `(is_mql OR dona_de_schedule = true OR kanban_stage IN ('qualificado', 'vendeu'))`;
+    const mql = `(is_mql OR dona_de_schedule = true OR kanban_stage IN ('qualificado', 'agendado', 'vendeu'))`;
     const responded = `EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(ai_context, '[]'::jsonb)) m WHERE m->>'role' = 'user')`;
     // Página de origem = caminho da landing_url do webhook de captura (sem
     // domínio nem query string), ex. "pagina-v1". Sem ghl_context = lead que
